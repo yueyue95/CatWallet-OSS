@@ -1,0 +1,26 @@
+services:
+  catwallet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?Set NEXT_PUBLIC_SUPABASE_URL in .env.local}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:?Set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env.local}
+    env_file:
+      - path: .env.local
+        required: true
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      SUPABASE_SERVER_URL: ${SUPABASE_SERVER_URL:-http://host.docker.internal:56431}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3000:3000"
+    volumes:
+      - catwallet_runtime:/app/.next/cache
+    restart: on-failure:3
+
+volumes:
+  catwallet_runtime:

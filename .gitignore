@@ -1,0 +1,52 @@
+# v0 sandbox internal files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+.snowflake/
+.v0-transfer/
+.vercel/
+.idea/
+.v0-export/
+.codex
+next.user-config.*
+
+# Environment variables
+.env*
+!.env.example
+*.local
+.idea/*
+
+# Common ignores
+node_modules
+.pnpm-store/
+package-lock.json
+.next/
+coverage/
+output/
+tsconfig.tsbuildinfo
+.DS_Store
+AGENTS.md
+**.csv
+**/.temp
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.backup
+*.bak
+*.log
+migration-history.txt
+SNAPSHOT-MANIFEST.md
+backups/
+.demo/
+supabase/.temp/
+supabase/.branches/
+supabase/.linked/
+
+# Playwright
+/playwright-report/
+/test-results/
+/blob-report/
+e2e/.auth/
+**/storage-state*.json
+docs/images/demo/.tmp/

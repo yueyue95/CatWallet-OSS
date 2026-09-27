@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="160" viewBox="0 0 560 160" role="img" aria-labelledby="title desc">
+  <title id="title">CatWallet</title>
+  <desc id="desc">A cat-eared wallet beside the CatWallet wordmark.</desc>
+  <rect width="560" height="160" rx="32" fill="#0b0d0e"/>
+  <g transform="translate(28 28)" fill="none" stroke="#22c55e" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 38V12l21 19 21-13 21 13 21-19v26"/>
+    <rect x="6" y="34" width="94" height="70" rx="20"/>
+    <path d="M72 60h32v28H72a14 14 0 0 1 0-28Z" fill="#22c55e"/>
+    <circle cx="78" cy="74" r="4" fill="#0b0d0e" stroke="none"/>
+  </g>
+  <text x="154" y="96" fill="#f8faf9" font-family="ui-sans-serif, system-ui, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">CatWallet</text>
+</svg>

@@ -1,0 +1,192 @@
+"use client";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
+import { type Transaction, type TransactionGroup } from "@/lib/data";
+import { GROUP_COLORS } from "@/lib/finance/group-colors";
+import { useI18n } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import { withSelectedMonth } from "./month-route";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+
+const incomeColor = "#10B981";
+
+function getGroupBadgeStyle(group: TransactionGroup) {
+  const color = group === "income" ? incomeColor : GROUP_COLORS[group];
+  return { backgroundColor: `${color}1A`, color };
+}
+
+const amountColors = {
+  income: "text-income",
+  expense: "text-expense",
+  saving: "text-savings",
+};
+
+interface TransactionsListHeaderProps {
+  readonly t: (key: string) => string;
+  readonly searchParams: URLSearchParams;
+  readonly router: ReturnType<typeof useRouter>;
+}
+
+function TransactionsListHeader({
+  t,
+  searchParams,
+  router,
+}: TransactionsListHeaderProps) {
+  const href = withSelectedMonth("/transactions", searchParams);
+  const prefetch = () => router.prefetch(href);
+
+  return (
+    <CardHeader className="flex flex-row items-center justify-between pb-2">
+      <div>
+        <CardTitle className="text-base lg:text-lg font-semibold text-foreground">
+          {t("dashboard.latestTransactions.title")}
+        </CardTitle>
+        <p className="text-xs lg:text-sm text-muted-foreground mt-1">
+          {t("dashboard.latestTransactions.description")}
+        </p>
+      </div>
+      <Link
+        href={href}
+        prefetch
+        onMouseEnter={prefetch}
+        onFocus={prefetch}
+        className="flex items-center gap-3 rounded-xl transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      >
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-primary hover:text-primary/80"
+        >
+          {t("common.viewAll")}
+          <ArrowRight className="w-4 h-4 ml-1" />
+        </Button>
+      </Link>
+    </CardHeader>
+  );
+}
+
+interface TransactionRowProps {
+  readonly transaction: Transaction;
+  readonly today: string;
+  readonly formatCurrency: (value: number) => string;
+  readonly formatDate: (
+    date: string,
+    options?: Intl.DateTimeFormatOptions,
+  ) => string;
+  readonly t: (key: string) => string;
+}
+
+function getTransactionRowTitle(
+  transaction: Transaction,
+  t: (key: string) => string,
+) {
+  if (!transaction.isCreditCardInvoice) return t(transaction.descriptionKey);
+
+  const invoiceKey =
+    transaction.invoice?.paymentMethodKey ?? transaction.paymentMethodKey;
+
+  return invoiceKey
+    ? `${t("transaction.creditCardInvoiceFor")} ${t(invoiceKey)}`
+    : t("transaction.creditCardInvoice");
+}
+
+function TransactionRowMeta({
+  transaction,
+  formatDate,
+  t,
+}: Pick<TransactionRowProps, "transaction" | "formatDate" | "t">) {
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <span
+        className="rounded-full px-2 py-0.5 text-[10px] font-medium capitalize lg:text-xs"
+        style={getGroupBadgeStyle(transaction.group)}
+      >
+        {t(`data.group.${transaction.group}`)}
+      </span>
+      <span className="text-xs text-muted-foreground">
+        {formatDate(transaction.date, { month: "short", day: "numeric" })}
+      </span>
+    </div>
+  );
+}
+
+function TransactionRow({
+  transaction,
+  today,
+  formatCurrency,
+  formatDate,
+  t,
+}: TransactionRowProps) {
+  const shouldPresentAsPlanned =
+    Boolean(transaction.isPlanned) && transaction.date > today;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 lg:gap-4 lg:px-6 lg:py-4",
+        shouldPresentAsPlanned && "opacity-70",
+      )}
+    >
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-xl lg:h-12 lg:w-12 lg:text-2xl">
+        {transaction.icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground">
+          {getTransactionRowTitle(transaction, t)}
+        </p>
+        <TransactionRowMeta
+          transaction={transaction}
+          formatDate={formatDate}
+          t={t}
+        />
+      </div>
+      <p
+        className={cn(
+          "text-sm font-semibold tabular-nums lg:text-base",
+          amountColors[transaction.type],
+        )}
+      >
+        {transaction.amount > 0 ? "+" : ""}
+        {formatCurrency(Math.abs(transaction.amount))}
+      </p>
+    </div>
+  );
+}
+
+type TransactionsListProps = {
+  readonly transactions: Transaction[];
+};
+
+export function TransactionsList({ transactions }: TransactionsListProps) {
+  const { formatCurrency, formatDate, t } = useI18n();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <Card className="h-fit bg-card border-border card-shadow flex flex-col">
+      <TransactionsListHeader
+        t={t}
+        searchParams={searchParams}
+        router={router}
+      />
+      <CardContent className="p-0 flex-1 overflow-hidden">
+        <div className="divide-y divide-border">
+          {transactions.map((transaction) => (
+            <TransactionRow
+              key={transaction.id}
+              transaction={transaction}
+              today={today}
+              formatCurrency={formatCurrency}
+              formatDate={formatDate}
+              t={t}
+            />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

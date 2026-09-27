@@ -1,0 +1,204 @@
+# Database Notes
+
+Database changes live in `supabase/migrations`.
+
+## Current tables
+
+The current committed schema defines these Supabase tables:
+
+- `profiles`
+- `categories`
+- `payment_methods`
+- `transactions`
+- `monthly_budgets`
+- `goals`
+- `privacy_requests`
+- `fixed_commitments`
+- `sinking_funds`
+- `installment_retirement_allocations`
+
+## Current migrations
+
+- `20260918152851_m_001_init.sql`: creates the finance schema, indexes, initial RLS policies, profile/category/payment-method defaults, and the initial auth user seed trigger.
+- `20260918152903_m_002_security_lgpd_hardening.sql`: adds `updated_at` and `deleted_at` columns, moves helper functions into the private schema, adds privacy requests, hardens grants and RLS policies, validates transaction ownership references, and adds LGPD-oriented comments.
+- `20260918152936_m_005_add_installment_group_metadata.sql`: adds stable installment grouping metadata and an authenticated-user scoped installment group index.
+- `20260918152951_m_006_add_installment_prepayment_metadata.sql`: adds installment prepayment metadata and an authenticated-user scoped prepayment month index.
+- `20260918153700_m_20260916080748_catwallet_malaysia_payment_defaults.sql`: changes onboarding defaults for newly created users to Cash, Bank, Credit Card, and Debit Card without modifying existing payment methods.
+- `20260918153039_m_010_stop_writing_plaintext_profile_pii.sql`: stops the signup trigger from writing plaintext `profiles.name`/`email` (application-layer encryption now owns these fields, see `lib/crypto/field-encryption.ts`), and drops the now-unused `transactions_user_id_notes_idx` partial index.
+- `20260918153651_m_011_catwallet_finance_models.sql`: adds fixed commitments, sinking funds, installment retirement allocations, ownership-reference triggers, RLS policies, and partial unique indexes for nullable savings targets.
+
+## What belongs in the repository
+
+The repository should include:
+
+- schema migrations
+- table constraints
+- indexes
+- RLS policies
+- trigger/function definitions required to run the app
+- seed/default data that does not contain private user information
+
+The repository must not include:
+
+- Supabase service-role keys
+- OAuth client secrets
+- `.env.local`
+- production database URLs
+- dumps with real user data
+- access tokens or refresh tokens
+
+## Profile fields used by the app
+
+- `id`
+- `email` — application-layer encrypted (`lib/crypto/field-encryption.ts`), never plaintext at rest. Distinct from `auth.users.email`, which Supabase Auth manages and is unaffected.
+- `name` — application-layer encrypted (`lib/crypto/field-encryption.ts`), never plaintext at rest.
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+`private.handle_new_user()` no longer writes plaintext `name`/`email` into `profiles` (see migration `010`). `lib/auth/encrypted-profile.ts` fills them in, encrypted, on the user's next authenticated request.
+
+## Category fields used by the app
+
+- `id`
+- `user_id`
+- `name`
+- `icon`
+- `group_type`
+- `is_default`
+- `monthly_limit`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+## Payment method fields used by the app
+
+- `id`
+- `user_id`
+- `name`
+- `type`
+- `credit_limit`
+- `due_day`
+- `closing_day`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+The application has backward-compatible fallbacks for older environments that do not have all optional payment-method fields. The current committed schema includes credit-card limit and due/closing day support, but does not define an `is_default` column for payment methods.
+
+## Transaction fields used by the app
+
+- `id`
+- `user_id`
+- `amount`
+- `category_id`
+- `date`
+- `description` — application-layer encrypted with a deterministic IV (`lib/crypto/field-encryption.ts`) so equality lookups (subscription grouping) still work; never plaintext at rest.
+- `kind`
+- `installment_group_id`
+- `installment_number`
+- `installment_total`
+- `advanced_to_month`
+- `advanced_at`
+- `notes` — application-layer encrypted (`lib/crypto/field-encryption.ts`), random IV; never plaintext at rest.
+- `payment_method_id`
+- `fixed_commitment_id` — optional link used to exclude already-paid fixed commitments from duplicate safe-to-spend deductions
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+Installments and subscriptions are modeled as multiple transaction rows. Installment rows from the same original purchase share `installment_group_id`, use 1-based `installment_number`, and store the original purchase count in `installment_total`. Installment groups are still user-owned transaction rows and must always be queried with the authenticated user's scope.
+
+## CatWallet fixed commitments
+
+Migration `20260918153651_m_011_catwallet_finance_models.sql` adds `fixed_commitments` with `name`, `amount`, `cadence`, optional custom interval, start/end dates, payment account, category, safe-to-spend inclusion, enabled state, timestamps, and soft deletion. Its RLS policies scope all operations to `auth.uid()`.
+
+Payments recorded from the fixed-commitment screen are ordinary `transactions` with `fixed_commitment_id`. The safe-to-spend service subtracts only the unpaid portion of a commitment and removes linked paid amounts from regular spending, preventing a fixed expense from being deducted twice.
+
+## CatWallet sinking funds
+
+The same migration adds `sinking_funds` with `name`, `emoji`, `current_amount`, `monthly_target`, optional target amount/use date, enabled state, notes, timestamps, and soft deletion. Enabled monthly targets participate in the dashboard's future-reserve amount; the model does not move money automatically.
+
+## Installment retirement allocations
+
+`installment_retirement_allocations` stores the post-installment plan separately from transaction notes. Each row identifies an installment group, a target (`category`, `sinking_fund`, or `savings`), a monthly amount, and the month from which the next budget allocation should begin. It records intent only; it does not transfer funds or rewrite historical transactions.
+
+Installment prepayment uses `advanced_to_month` and `advanced_at`. The original transaction `date`, category, payment method, and installment metadata are preserved for auditability. Payment and invoice views use `advanced_to_month` as the payment context so advanced installments appear in the target month and no longer appear as future obligations.
+
+Subscription rows use `notes` values beginning with `subscription`; paused subscriptions use `subscription paused`. Since `notes` is stored encrypted, this prefix check happens in application code against the decrypted value (`lib/finance/transactions.ts`), not as a SQL `LIKE` predicate.
+
+## Monthly budget fields in the schema
+
+- `id`
+- `user_id`
+- `month`
+- `income`
+- `needs_limit`
+- `wants_limit`
+- `savings_limit`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+The current UI calculates 50/30/20 budget data from transactions and category limits. The `monthly_budgets` table is available in the schema for persisted monthly budget plans.
+
+## Goal fields used by the app
+
+- `id`
+- `user_id`
+- `name`
+- `icon`
+- `target_amount`
+- `current_amount`
+- `deadline`
+- `color`
+- `created_at`
+- `updated_at`
+- `deleted_at`
+
+`lib/finance/transactions.ts` calls the `add_goal_funds` RPC when adding funds to an existing goal. If an environment does not already provide this RPC, add a migration before using the goal funding flow.
+
+## Privacy request fields in the schema
+
+- `id`
+- `user_id`
+- `request_type`
+- `status`
+- `details`
+- `response`
+- `requested_at`
+- `resolved_at`
+- `updated_at`
+
+The table supports LGPD workflows for access, export, correction, deletion, consent, and support requests.
+
+## Database functions and triggers
+
+- `private.handle_new_user()` creates a profile, default categories, and default payment methods after Supabase Auth user creation.
+- `private.touch_updated_at()` keeps `updated_at` current on updates.
+- `private.validate_transaction_owner_refs()` prevents transactions from referencing categories or payment methods owned by another user.
+- `on_auth_user_created` runs after inserts on `auth.users`.
+
+Email/password signups and Google OAuth signups both insert users into `auth.users`, so both flows use the same `on_auth_user_created` onboarding trigger. Do not duplicate default profile, category, or payment-method setup in frontend code.
+
+## Applying migrations
+
+Preferred:
+
+```bash
+supabase db push
+```
+
+Fallback:
+
+Apply the SQL files in `supabase/migrations` through the Supabase SQL editor.
+
+## Security requirements
+
+- Keep RLS enabled on exposed user-owned tables.
+- Force RLS where the current migrations force it.
+- Policies should restrict rows by the authenticated user's ID and should be operation-specific when possible.
+- Do not grant broad public write access.
+- Keep unauthenticated `anon` access revoked for user-owned finance data.
+- Do not expose service-role credentials to the application frontend.
+- Keep privileged helper functions out of exposed schemas.

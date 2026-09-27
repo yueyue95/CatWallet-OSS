@@ -1,0 +1,136 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+
+import {
+  getCurrentMonthValue,
+  getMonthFromSearchParams,
+  withSelectedMonth,
+} from "@/components/dashboard/month-route";
+
+export const sidebarRoutes = [
+  "/dashboard",
+  "/transactions",
+  "/categories",
+  "/budgets",
+  "/payments",
+  "/reports",
+  "/goals",
+  "/settings",
+];
+
+function getPrefetchTargets(pathname: string, searchParams: URLSearchParams) {
+  return sidebarRoutes
+    .filter((route) => route !== pathname)
+    .map((route) => withSelectedMonth(route, searchParams));
+}
+
+function useMonthQueryParamSync({
+  pathname,
+  router,
+  searchParams,
+}: {
+  pathname: string;
+  router: ReturnType<typeof useRouter>;
+  searchParams: URLSearchParams;
+}) {
+  useEffect(() => {
+    if (getMonthFromSearchParams(searchParams)) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    nextSearchParams.set("month", getCurrentMonthValue());
+    router.replace(`${pathname}?${nextSearchParams.toString()}`, {
+      scroll: false,
+    });
+  }, [pathname, router, searchParams]);
+}
+
+function usePrefetchSidebarRoutes({
+  pathname,
+  router,
+  searchParams,
+}: {
+  pathname: string;
+  router: ReturnType<typeof useRouter>;
+  searchParams: URLSearchParams;
+}) {
+  const prefetched = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    // Start prefetch only after the page has fully loaded (or after 1s fallback).
+    const startPrefetch = () => {
+      const prefetchRoutes = () => {
+        for (const route of getPrefetchTargets(pathname, searchParams)) {
+          if (!prefetched.current.has(route)) {
+            prefetched.current.add(route);
+            try {
+              router.prefetch(route);
+            } catch {}
+          }
+        }
+      };
+
+      if (typeof window.requestIdleCallback === "function") {
+        window.requestIdleCallback(prefetchRoutes);
+      } else {
+        window.setTimeout(prefetchRoutes, 300);
+      }
+    };
+
+    if (document.readyState === "complete") {
+      startPrefetch();
+    } else {
+      const onLoad = () => startPrefetch();
+      window.addEventListener("load", onLoad, { once: true });
+      // Fallback: start after 1s if load doesn't fire for some reason
+      const fallbackId = window.setTimeout(startPrefetch, 1000);
+
+      return () => {
+        window.removeEventListener("load", onLoad);
+        window.clearTimeout(fallbackId);
+      };
+    }
+  }, [pathname, router, searchParams]);
+}
+
+function useRefreshOnPathnameChange({
+  pathname,
+  router,
+}: {
+  pathname: string;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const didMount = useRef(false);
+  const lastRefreshed = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Only refresh once per pathname change and avoid repeated refreshes.
+    if (!didMount.current) {
+      didMount.current = true;
+      lastRefreshed.current = pathname;
+      return;
+    }
+
+    if (lastRefreshed.current === pathname) return;
+
+    lastRefreshed.current = pathname;
+    const refreshTimeoutId = window.setTimeout(() => router.refresh(), 250);
+
+    return () => window.clearTimeout(refreshTimeoutId);
+  }, [pathname, router]);
+}
+
+export function NavigationPrefetcher() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useMonthQueryParamSync({ pathname, router, searchParams });
+  usePrefetchSidebarRoutes({ pathname, router, searchParams });
+  useRefreshOnPathnameChange({ pathname, router });
+
+  return null;
+}

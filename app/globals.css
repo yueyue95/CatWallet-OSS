@@ -1,0 +1,507 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ══════════════════════════════════════════════
+   CATWALLET DESIGN SYSTEM
+   Stylesheet v2.0 | Warm-neutral palette
+   ══════════════════════════════════════════════ */
+
+/* ─── Light mode ─── */
+:root {
+  /* shadcn core tokens */
+  --background: #fff9f1;
+  --foreground: #1a1c1e;
+  --card: #ffffff;
+  --card-foreground: #1a1c1e;
+  --popover: #ffffff;
+  --popover-foreground: #1a1c1e;
+  --primary: #22c55e;
+  --primary-foreground: #fff9f1;
+  --secondary: #fff7eb;
+  --secondary-foreground: #1a1c1e;
+  --muted: #f5f0e8;
+  --muted-foreground: #6b6f76;
+  --accent: #2a3038;
+  --accent-foreground: #1a1c1e;
+  --destructive: #c53030;
+  --destructive-foreground: #ffffff;
+  --border: #f1e7da;
+  --input: #f1e7da;
+  --ring: #22c55e;
+  --radius: 0.75rem;
+
+  /* CatWallet surface tokens */
+  --surface: #ffffff;
+  --surface-elevated: #fffdf8;
+  --border-strong: #e0d4c4;
+  --border-subtle: rgba(241, 231, 218, 0.6);
+
+  /* CatWallet text tokens */
+  --text-primary: #1a1c1e;
+  --text-secondary: #6b6f76;
+  --text-muted: #a6a29a;
+  --text-inverse: #ffffff;
+
+  /* Brand accent */
+  --primary-dark: #15803d;
+  --primary-light: rgba(34, 197, 94, 0.12);
+  --primary-glow: rgba(34, 197, 94, 0.2);
+  --accent-dark: #2a3038;
+  --accent-light: rgba(246, 196, 83, 0.15);
+
+  /* Finance semantic */
+  --income: #15803d;
+  --income-bg: rgba(21, 128, 61, 0.1);
+  --expense: #c53030;
+  --expense-bg: rgba(197, 48, 48, 0.1);
+  --savings: #6d28d9;
+  --savings-bg: rgba(109, 40, 217, 0.1);
+  --needs: #c2410c;
+  --needs-bg: rgba(194, 65, 12, 0.1);
+  --wants: #be185d;
+  --wants-bg: rgba(190, 24, 93, 0.1);
+
+  /* Status */
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.1);
+  --warning: #f6c453;
+  --warning-bg: rgba(246, 196, 83, 0.12);
+  --error: #c53030;
+  --error-bg: rgba(197, 48, 48, 0.1);
+
+  /* Shadows */
+  --shadow-sm:
+    0 1px 3px rgba(15, 17, 18, 0.08), 0 1px 2px rgba(15, 17, 18, 0.04);
+  --shadow-md:
+    0 4px 12px rgba(15, 17, 18, 0.1), 0 2px 4px rgba(15, 17, 18, 0.06);
+  --shadow-lg:
+    0 8px 24px rgba(15, 17, 18, 0.12), 0 4px 8px rgba(15, 17, 18, 0.06);
+  --shadow-glow: 0 0 0 3px rgba(34, 197, 94, 0.25);
+
+  /* Legacy aliases — keep existing components working */
+  --card-shadow: var(--shadow-sm);
+  --shadow-card: var(--shadow-sm);
+  --shadow-raised: var(--shadow-lg);
+  --color-positive: var(--income);
+  --color-positive-bg: var(--income-bg);
+  --color-negative: var(--expense);
+  --color-negative-bg: var(--expense-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-info: var(--savings);
+  --color-info-bg: var(--savings-bg);
+  --color-border-strong: var(--border-strong);
+
+  /* Chart palette */
+  --chart-1: #22c55e;
+  --chart-2: #15803d;
+  --chart-3: #be185d;
+  --chart-4: #6d28d9;
+  --chart-5: #c2410c;
+
+  /* Sidebar (shadcn) */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1a1c1e;
+  --sidebar-primary: #22c55e;
+  --sidebar-primary-foreground: #1a1c1e;
+  --sidebar-accent: #fff7eb;
+  --sidebar-accent-foreground: #1a1c1e;
+  --sidebar-border: #f1e7da;
+  --sidebar-ring: #22c55e;
+}
+
+/* ─── Dark mode ─── */
+.dark {
+  /* shadcn core tokens */
+  --background: #0b0d0e;
+  --foreground: #f5f7fa;
+  --card: #111418;
+  --card-foreground: #f5f7fa;
+  --popover: #161b21;
+  --popover-foreground: #f5f7fa;
+  --primary: #22c55e;
+  --primary-foreground: #0b0d0e;
+  --secondary: #1f2428;
+  --secondary-foreground: #f5f7fa;
+  --muted: #252b31;
+  --muted-foreground: #a1a7ad;
+  --accent: #2a3038;
+  --accent-foreground: #0b0d0e;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #1f2428;
+  --input: #1f2428;
+  --ring: #22c55e;
+
+  /* CatWallet surface tokens */
+  --surface: #111418;
+  --surface-elevated: #161b21;
+  --border-strong: #2a3038;
+  --border-subtle: rgba(31, 36, 40, 0.8);
+
+  /* CatWallet text tokens */
+  --text-primary: #f5f7fa;
+  --text-secondary: #a1a7ad;
+  --text-muted: #6b7280;
+  --text-inverse: #0b0d0e;
+
+  /* Brand accent */
+  --primary-dark: #16a34a;
+  --primary-light: rgba(34, 197, 94, 0.15);
+  --primary-glow: rgba(34, 197, 94, 0.25);
+  --accent-dark: #2a3038;
+  --accent-light: rgba(246, 196, 83, 0.15);
+
+  /* Finance semantic (brighter for dark surfaces) */
+  --income: #22c55e;
+  --income-bg: rgba(34, 197, 94, 0.12);
+  --expense: var(--destructive);
+  --expense-bg: rgba(252, 129, 129, 0.12);
+  --savings: #a78bfa;
+  --savings-bg: rgba(167, 139, 250, 0.12);
+  --needs: #fb923c;
+  --needs-bg: rgba(251, 146, 60, 0.12);
+  --wants: #f472b6;
+  --wants-bg: rgba(244, 114, 182, 0.12);
+
+  /* Status */
+  --success: #22c55e;
+  --success-bg: rgba(34, 197, 94, 0.12);
+  --warning: #f6c453;
+  --warning-bg: rgba(246, 196, 83, 0.12);
+  --error: #fc8181;
+  --error-bg: rgba(252, 129, 129, 0.12);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5), 0 4px 8px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+
+  /* Legacy aliases */
+  --card-shadow: none;
+  --shadow-card: none;
+  --shadow-raised: var(--shadow-lg);
+  --color-positive: var(--income);
+  --color-positive-bg: var(--income-bg);
+  --color-negative: var(--expense);
+  --color-negative-bg: var(--expense-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-info: var(--savings);
+  --color-info-bg: var(--savings-bg);
+  --color-border-strong: var(--border-strong);
+
+  /* Chart palette (verified readable on dark surface) */
+  --chart-1: #22c55e;
+  --chart-2: #4ade80;
+  --chart-3: #f472b6;
+  --chart-4: #a78bfa;
+  --chart-5: #fb923c;
+
+  /* Sidebar (shadcn) */
+  --sidebar: #111418;
+  --sidebar-foreground: #f5f7fa;
+  --sidebar-primary: #22c55e;
+  --sidebar-primary-foreground: #0b0d0e;
+  --sidebar-accent: #1f2428;
+  --sidebar-accent-foreground: #f5f7fa;
+  --sidebar-border: #1f2428;
+  --sidebar-ring: #22c55e;
+}
+
+@theme inline {
+  --font-sans:
+    var(--font-satoshi), "Noto Sans SC", "Microsoft YaHei", "微软雅黑",
+    "PingFang SC", "Noto Sans", system-ui, ui-sans-serif, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* shadcn token mappings */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Sidebar token mappings */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* CatWallet finance semantic mappings */
+  --color-income: var(--income);
+  --color-income-bg: var(--income-bg);
+  --color-expense: var(--expense);
+  --color-expense-bg: var(--expense-bg);
+  --color-savings: var(--savings);
+  --color-savings-bg: var(--savings-bg);
+  --color-needs: var(--needs);
+  --color-needs-bg: var(--needs-bg);
+  --color-wants: var(--wants);
+  --color-wants-bg: var(--wants-bg);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-error: var(--error);
+  --color-error-bg: var(--error-bg);
+
+  /* CatWallet surface / text mappings */
+  --color-surface: var(--surface);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  /* Brand accent */
+  --color-primary-dark: var(--primary-dark);
+  --color-primary-light: var(--primary-light);
+  --color-primary-glow: var(--primary-glow);
+  --color-accent-dark: var(--accent-dark);
+  --color-accent-light: var(--accent-light);
+
+  /* Legacy alias mappings */
+  --color-positive: var(--income);
+  --color-positive-bg: var(--income-bg);
+  --color-negative: var(--expense);
+  --color-negative-bg: var(--expense-bg);
+  --color-info: var(--savings);
+  --color-info-bg: var(--savings-bg);
+  --color-border-strong: var(--border-strong);
+
+  /* Shadow mappings */
+  --shadow-card: var(--shadow-sm);
+  --shadow-raised: var(--shadow-lg);
+  --shadow-glow: var(--shadow-glow);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  .disable-theme-transitions,
+  .disable-theme-transitions * {
+    transition: none !important;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      "Satoshi", "Noto Sans SC", "Microsoft YaHei", "微软雅黑", "PingFang SC",
+      "Noto Sans", system-ui, ui-sans-serif, sans-serif;
+    font-feature-settings: "cv01", "cv02", "cv03";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  button {
+    cursor: pointer;
+  }
+}
+
+/* Monetary value utilities */
+.font-numeric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+.amount-positive {
+  color: var(--income);
+}
+.amount-negative {
+  color: var(--expense);
+}
+
+/* Glassmorphism utility */
+.glass-card {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  border-radius: 16px;
+}
+.dark .glass-card {
+  background: rgba(17, 20, 24, 0.65);
+  border-color: var(--border);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* Card shadow utility */
+.card-shadow {
+  box-shadow: var(--shadow-sm);
+}
+
+/* CatWallet loading animation */
+.catwallet-loading-loader {
+  position: relative;
+  z-index: 0;
+}
+.catwallet-loading-loader::before,
+.catwallet-loading-loader::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(34, 197, 94, 0.45);
+  z-index: -1;
+  animation: catwallet-loading-ripple 1.5s ease-out infinite;
+}
+.catwallet-loading-loader::before {
+  animation-delay: -0.75s;
+}
+
+@keyframes catwallet-loading-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+@keyframes tx-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(var(--fade-distance, 24px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tx-fade-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Page enter animation */
+.animate-page-enter {
+  animation: tx-fade-up 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--secondary) 0%,
+    rgba(255, 255, 255, 0.04) 50%,
+    var(--secondary) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
+/* Dashboard card slide-up animation */
+.animated-card {
+  opacity: 0;
+  transform: translateY(32px);
+  transition:
+    opacity 500ms cubic-bezier(0.22, 1, 0.36, 1) var(--card-delay, 0ms),
+    transform 500ms cubic-bezier(0.22, 1, 0.36, 1) var(--card-delay, 0ms);
+}
+.animated-card.animated-card--visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  /* Keep loading ripple visible even with reduced motion */
+  .catwallet-loading-loader::before,
+  .catwallet-loading-loader::after {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
+  }
+  /* Cards immediately visible — no hidden state in reduced motion */
+  .animated-card {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
