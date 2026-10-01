@@ -535,6 +535,24 @@ describe("getPaymentsDueData", () => {
           due_day: null,
         },
       }),
+      // Excluded from bills: the expense leg of an account transfer.
+      txRow({
+        id: "tx-transfer-out",
+        date: `${CURRENT_MONTH}-13`,
+        description: "Savings transfer",
+        amount: 150,
+        entry_kind: "transfer",
+        payment_method_id: pmBankId,
+        payment_methods: {
+          id: pmBankId,
+          name: "Bank Transfer",
+          type: "bank",
+          closing_day: null,
+          due_day: null,
+        },
+        transfer_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        transfer_side: "out",
+      }),
       // Excluded from bills: wrong type (income).
       txRow({
         id: "tx-salary",

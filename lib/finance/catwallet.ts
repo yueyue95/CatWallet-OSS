@@ -14,7 +14,10 @@ import {
   encryptDescription,
   encryptField,
 } from "@/lib/crypto/field-encryption";
-import { isRepaymentTransaction } from "@/lib/finance/transaction-semantics";
+import {
+  getIncomeAmount,
+  getPersonalSpendingAmount,
+} from "@/lib/finance/transaction-semantics";
 import {
   groupTransactionsByInstallmentGroup,
   isRetiredFutureInstallmentProjection,
@@ -161,6 +164,7 @@ export type FunMoneyBudgetInput = {
 };
 
 export type InstallmentOverviewItem = {
+  archivedAt?: string;
   amountMode: InstallmentAmountMode;
   currentInstallment: number;
   monthlyAmount: number;
@@ -786,7 +790,7 @@ export async function getCatWalletDashboardData(
     ctx.supabase
       .from("transactions")
       .select(
-        "amount, kind, fixed_commitment_id, date, entry_kind, notes, installment_group_id, installment_number, installment_total, installment_completed_at",
+        "id, amount, kind, fixed_commitment_id, date, entry_kind, related_transaction_id, notes, installment_group_id, installment_number, installment_total, installment_completed_at",
       )
       .eq("user_id", ctx.userId)
       .gte("date", `${month}-01`)
@@ -822,43 +826,45 @@ export async function getCatWalletDashboardData(
     amount: number | string;
     date: string;
     fixed_commitment_id: string | null;
+    id: string;
     kind: "income" | "expense" | "saving";
-    entry_kind?: "purchase" | "repayment" | "refund" | "transfer";
+    entry_kind?:
+      "purchase" | "repayment" | "refund" | "reimbursement" | "transfer";
     installment_completed_at?: string | null;
     installment_group_id?: string | null;
     installment_number?: number | null;
     installment_total?: number | null;
     notes: string | null;
+    related_transaction_id?: string | null;
   }>;
   const mappedTransactions = transactions
     .map((transaction) => ({
       ...transaction,
+      amount: Number(transaction.amount),
       entryKind: transaction.entry_kind,
       installmentCompletedAt: transaction.installment_completed_at,
       installmentGroupId: transaction.installment_group_id,
       installmentNumber: transaction.installment_number,
       installmentTotal: transaction.installment_total,
       notes: transaction.notes ? decryptField(transaction.notes) : null,
+      relatedTransactionId: transaction.related_transaction_id ?? null,
+      type: transaction.kind,
     }))
     .filter(
       (transaction) => !isRetiredFutureInstallmentProjection(transaction),
     );
   const incomeTransactions = mappedTransactions.filter(
-    (transaction) => transaction.kind === "income",
+    (transaction) => getIncomeAmount(transaction) > 0,
   );
   const actualIncome = incomeTransactions.reduce(
-    (sum, transaction) => sum + Math.abs(Number(transaction.amount)),
+    (sum, transaction) => sum + getIncomeAmount(transaction),
     0,
   );
-  const spent = mappedTransactions
-    .filter(
-      (transaction) =>
-        transaction.kind === "expense" && !isRepaymentTransaction(transaction),
-    )
-    .reduce(
-      (sum, transaction) => sum + Math.abs(Number(transaction.amount)),
-      0,
-    );
+  const spent = mappedTransactions.reduce(
+    (sum, transaction) =>
+      sum + getPersonalSpendingAmount(transaction, mappedTransactions),
+    0,
+  );
   const paidByCommitment = new Map<string, number>();
 
   for (const transaction of mappedTransactions) {
@@ -999,9 +1005,10 @@ export async function getFunMoneyOverview(
       .maybeSingle(),
     ctx.supabase
       .from("transactions")
-      .select("amount, date, kind, counts_toward_fun_money, deleted_at")
+      .select(
+        "id, amount, date, kind, entry_kind, related_transaction_id, counts_toward_fun_money, deleted_at",
+      )
       .eq("user_id", ctx.userId)
-      .eq("kind", "expense")
       .gte("date", `${month}-01`)
       .lt("date", `${nextMonth(month)}-01`)
       .is("deleted_at", null),
@@ -1023,7 +1030,10 @@ export async function getFunMoneyOverview(
     counts_toward_fun_money: boolean;
     date: string;
     deleted_at: string | null;
+    entry_kind: string;
+    id: string;
     kind: "expense" | "income" | "saving";
+    related_transaction_id: string | null;
   }>;
   const spent = sumFunMoneyTransactions(
     transactions.map((transaction) => ({
@@ -1031,7 +1041,10 @@ export async function getFunMoneyOverview(
       countsTowardFunMoney: transaction.counts_toward_fun_money,
       date: transaction.date,
       deletedAt: transaction.deleted_at,
+      entryKind: transaction.entry_kind,
+      id: transaction.id,
       kind: transaction.kind,
+      relatedTransactionId: transaction.related_transaction_id,
     })),
     month,
   );
@@ -1071,18 +1084,159 @@ function nextMonth(month: string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+type ModeledInstallmentPlanRow = {
+  amount_mode: string;
+  current_installment: number;
+  deleted_at: string | null;
+  description: string;
+  entered_amount: number;
+  id: string;
+  installment_amount: number;
+  status: string;
+  total_amount: number;
+  total_installments: number;
+};
+
+type ModeledInstallmentOccurrenceRow = {
+  amount: number;
+  due_date: string;
+  installment_number: number;
+  plan_id: string;
+  status: string;
+};
+
+function indexOccurrencesByPlan(
+  occurrences: ModeledInstallmentOccurrenceRow[],
+) {
+  const indexed = new Map<string, ModeledInstallmentOccurrenceRow[]>();
+  for (const occurrence of occurrences) {
+    const planOccurrences = indexed.get(occurrence.plan_id) ?? [];
+    planOccurrences.push(occurrence);
+    indexed.set(occurrence.plan_id, planOccurrences);
+  }
+  return indexed;
+}
+
+function modeledInstallmentEnd(
+  storedPlan: ModeledInstallmentPlanRow,
+  occurrences: ModeledInstallmentOccurrenceRow[],
+) {
+  const last = occurrences.at(-1);
+  return {
+    dueDate: last ? last.due_date : "",
+    monthlyAmount: Number(last ? last.amount : storedPlan.installment_amount),
+  };
+}
+
+function isModeledInstallmentRetired(status: string, dueDate: string) {
+  if (status === "completed") return true;
+  if (!dueDate) return false;
+  return dueDate < new Date().toISOString().slice(0, 10);
+}
+
+function toModeledInstallmentOverview(
+  storedPlan: ModeledInstallmentPlanRow,
+  occurrences: ModeledInstallmentOccurrenceRow[],
+  allocations: InstallmentRetirementAllocation[],
+): InstallmentOverviewItem {
+  const amountMode = storedPlan.amount_mode as InstallmentAmountMode;
+  const computed = buildInstallmentPlan({
+    amount: Number(storedPlan.entered_amount),
+    amountMode,
+    currentInstallment: storedPlan.current_installment,
+    installmentCount: storedPlan.total_installments,
+  });
+  const end = modeledInstallmentEnd(storedPlan, occurrences);
+  const paidAmount = Number(
+    computed.installmentAmounts
+      .slice(0, storedPlan.current_installment)
+      .reduce((sum, amount) => sum + amount, 0)
+      .toFixed(2),
+  );
+  return {
+    allocations: allocations.filter(
+      (allocation) => allocation.installmentGroupId === storedPlan.id,
+    ),
+    amountMode,
+    currentInstallment: storedPlan.current_installment,
+    endDate: end.dueDate,
+    groupId: storedPlan.id,
+    monthlyAmount: end.monthlyAmount,
+    name: decryptField(storedPlan.description) || "Installment",
+    paidAmount,
+    paidInstallments: storedPlan.current_installment,
+    remainingAmount: computed.remainingAmount,
+    remainingInstallments: computed.remainingInstallments,
+    retired: isModeledInstallmentRetired(storedPlan.status, end.dueDate),
+    retirementStartsMonth: end.dueDate
+      ? nextMonth(end.dueDate.slice(0, 7))
+      : "",
+    totalAmount: Number(storedPlan.total_amount),
+    totalInstallments: storedPlan.total_installments,
+  };
+}
+
+async function listModeledInstallmentOverview(
+  ctx: AuthenticatedUserContext,
+  allocations: InstallmentRetirementAllocation[],
+  includeDeleted: boolean,
+) {
+  const [plans, occurrences] = await Promise.all([
+    ctx.supabase
+      .from("installment_plans")
+      .select(
+        "id, description, amount_mode, entered_amount, installment_amount, total_amount, current_installment, total_installments, status, deleted_at",
+      )
+      .eq("user_id", ctx.userId),
+    ctx.supabase
+      .from("installment_occurrences")
+      .select("plan_id, installment_number, amount, due_date, status")
+      .eq("user_id", ctx.userId)
+      .is("deleted_at", null)
+      .order("installment_number"),
+  ]);
+  if (plans.error)
+    throw new Error(`Unable to load installment plans: ${plans.error.message}`);
+  if (occurrences.error)
+    throw new Error(
+      `Unable to load installment occurrences: ${occurrences.error.message}`,
+    );
+  const indexed = indexOccurrencesByPlan(occurrences.data ?? []);
+  const storedPlans = plans.data ?? [];
+  return {
+    allPlanIds: storedPlans.map((plan) => plan.id),
+    items: storedPlans
+      .filter((plan) => includeDeleted || plan.deleted_at === null)
+      .map((plan) => ({
+        ...toModeledInstallmentOverview(
+          plan,
+          indexed.get(plan.id) ?? [],
+          allocations,
+        ),
+        ...(plan.deleted_at ? { archivedAt: plan.deleted_at } : {}),
+      })),
+  };
+}
+
 export async function getInstallmentOverview(
   userContext?: AuthenticatedUserContext,
+  options: { includeDeleted?: boolean } = {},
 ): Promise<InstallmentOverviewItem[]> {
   const ctx = await resolveContext(userContext);
   const [transactions, allocations] = await Promise.all([
     listTransactions({ includeFuture: true, userContext: ctx }),
     listInstallmentRetirementAllocations(undefined, ctx),
   ]);
-  const groups = groupTransactionsByInstallmentGroup(transactions);
+  const modeled = await listModeledInstallmentOverview(
+    ctx,
+    allocations,
+    options.includeDeleted === true,
+  );
   const today = new Date().toISOString().slice(0, 10);
+  const groups = groupTransactionsByInstallmentGroup(transactions);
+  for (const planId of modeled.allPlanIds) groups.delete(planId);
 
-  return [...groups.entries()].map(([groupId, group]) => {
+  const legacyPlans = [...groups.entries()].map(([groupId, group]) => {
     const first = group[0];
     const last = group[group.length - 1];
     const amountMode = first?.installmentAmountMode ?? "total";
@@ -1174,4 +1328,6 @@ export async function getInstallmentOverview(
       totalInstallments: group.length,
     };
   });
+
+  return [...modeled.items, ...legacyPlans];
 }

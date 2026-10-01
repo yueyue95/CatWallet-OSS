@@ -6,6 +6,8 @@ import {
   updateSinkingFund,
 } from "@/lib/finance/catwallet";
 import type { AccountBalance } from "@/lib/finance/account-balances";
+import { createCreditCardInvoiceTransactions } from "@/lib/finance/credit-card-invoices";
+import type { Transaction } from "@/lib/data";
 import type {
   AuthenticatedUserContext,
   ListTransactionsOptions,
@@ -149,6 +151,27 @@ function incomeTransaction(amount: number, date: string) {
   };
 }
 
+function creditCardTransaction(
+  overrides: Partial<Transaction> & Pick<Transaction, "amount" | "date" | "id">,
+): Transaction {
+  return {
+    amount: overrides.amount,
+    categoryKey: "data.category.shopping",
+    date: overrides.date,
+    descriptionKey: "Synthetic purchase",
+    group: "wants",
+    icon: "card",
+    id: overrides.id,
+    paymentMethodClosingDay: 7,
+    paymentMethodDueDay: 14,
+    paymentMethodId: "card",
+    paymentMethodKey: "Synthetic card",
+    paymentMethodType: "credit",
+    type: "expense",
+    ...overrides,
+  };
+}
+
 describe("getCatWalletDashboardData credit card accounting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -219,6 +242,129 @@ describe("getCatWalletDashboardData credit card accounting", () => {
       { bank: 960, liability: 80, nextDue: 80, safe: 0, spent: 0 },
       { bank: 880, liability: 0, nextDue: null, safe: 0, spent: 0 },
     ]);
+  });
+
+  it("removes a stale invoice once the card liability is fully repaid", async () => {
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        {
+          closingDay: 7,
+          dueDay: 14,
+          id: "card",
+          labelKey: "Synthetic card",
+        },
+      ],
+      transactions: [
+        creditCardTransaction({
+          amount: -100,
+          date: "2026-04-01",
+          id: "prior-purchase",
+        }),
+        creditCardTransaction({
+          amount: -75,
+          date: "2026-04-20",
+          id: "current-purchase",
+        }),
+        creditCardTransaction({
+          amount: -175,
+          date: "2026-05-05",
+          entryKind: "repayment",
+          id: "full-repayment",
+          paymentMethodId: "bank",
+          paymentMethodType: "bank",
+          relatedInvoiceId: "credit-card-invoice:card:2026-04",
+        }),
+      ],
+    });
+    const result = await getCatWalletDashboardData(
+      "2026-05",
+      context({
+        balances: [
+          {
+            balanceTrackingEnabled: true,
+            currentBalance: 825,
+            currentLiability: null,
+            id: "bank",
+          },
+          {
+            balanceTrackingEnabled: true,
+            currentBalance: null,
+            currentLiability: 0,
+            id: "card",
+          },
+        ] as unknown as AccountBalance[],
+        invoices,
+        transactions: [],
+      }),
+    );
+
+    expect(result.nextDue).toBeNull();
+  });
+
+  it("does not revive a repaid invoice after a next-cycle purchase", async () => {
+    const invoiceTransactions = [
+      creditCardTransaction({
+        amount: -100,
+        date: "2026-04-01",
+        id: "prior-purchase",
+      }),
+      creditCardTransaction({
+        amount: -75,
+        date: "2026-04-20",
+        id: "current-purchase",
+      }),
+      creditCardTransaction({
+        amount: -175,
+        date: "2026-05-05",
+        entryKind: "repayment",
+        id: "full-repayment",
+        paymentMethodId: "bank",
+        paymentMethodType: "bank",
+        relatedInvoiceId: "credit-card-invoice:card:2026-04",
+      }),
+      creditCardTransaction({
+        amount: -25,
+        date: "2026-05-07",
+        id: "next-cycle-purchase",
+      }),
+    ];
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        {
+          closingDay: 7,
+          dueDay: 14,
+          id: "card",
+          labelKey: "Synthetic card",
+        },
+      ],
+      transactions: invoiceTransactions,
+    });
+    const result = await getCatWalletDashboardData(
+      "2026-05",
+      context({
+        balances: [
+          {
+            balanceTrackingEnabled: true,
+            currentBalance: 825,
+            currentLiability: null,
+            id: "bank",
+          },
+          {
+            balanceTrackingEnabled: true,
+            currentBalance: null,
+            currentLiability: 25,
+            id: "card",
+          },
+        ] as unknown as AccountBalance[],
+        invoices,
+        transactions: [transaction(25, "2026-05-07", "purchase")],
+      }),
+    );
+
+    expect(result.accountBalances[1]?.currentLiability).toBe(25);
+    expect(result.nextDue).toBeNull();
   });
 
   it("does not count a completed installment projection in future-month spending", async () => {

@@ -26,6 +26,11 @@ describe("CatWallet Butler capability contracts", () => {
         "update_transaction",
         "delete_transaction",
         "restore_transaction",
+        "create_account_transfer",
+        "update_account_transfer",
+        "delete_account_transfer",
+        "restore_account_transfer",
+        "create_reimbursement",
         "create_payment_account",
         "update_payment_account",
         "set_opening_balance",
@@ -85,7 +90,7 @@ describe("CatWallet Butler capability contracts", () => {
 
     expect(
       createInstallmentSchema.parse({
-        amount: 269.33,
+        amount: 283.47,
         amountMode: "per_installment",
         categoryId: CATEGORY_ID,
         currentInstallment: 9,
@@ -118,7 +123,7 @@ describe("CatWallet Butler capability contracts", () => {
 
     expect(
       updateInstallmentSchema.parse({
-        amount: 269.33,
+        amount: 283.47,
         categoryId: CATEGORY_ID,
         date: "2026-09-01",
         description: "保险分期",

@@ -95,9 +95,12 @@ export function calculateBudgetData(
 export function sumBudgetUsageByGroup(
   transactions: Array<{
     amount: number;
-    entryKind?: "purchase" | "repayment" | "refund" | "transfer";
+    entryKind?:
+      "purchase" | "repayment" | "refund" | "reimbursement" | "transfer";
     group: TransactionGroup;
+    id?: string;
     notes?: string | null;
+    relatedTransactionId?: string | null;
   }>,
 ) {
   return transactions.reduce(
@@ -110,7 +113,20 @@ export function sumBudgetUsageByGroup(
         return totals;
       }
 
-      totals[transaction.group] += Math.abs(transaction.amount);
+      const reimbursedAmount = transaction.id
+        ? transactions.reduce(
+            (sum, candidate) =>
+              candidate.entryKind === "reimbursement" &&
+              candidate.relatedTransactionId === transaction.id
+                ? sum + Math.abs(candidate.amount)
+                : sum,
+            0,
+          )
+        : 0;
+      totals[transaction.group] += Math.max(
+        Math.abs(transaction.amount) - reimbursedAmount,
+        0,
+      );
       return totals;
     },
     {

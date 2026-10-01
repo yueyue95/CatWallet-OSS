@@ -9,6 +9,69 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      account_transfers: {
+        Row: {
+          amount: number;
+          created_at: string;
+          deleted_at: string | null;
+          description: string;
+          destination_account_id: string;
+          id: string;
+          idempotency_key: string;
+          notes: string | null;
+          revision: number;
+          source_account_id: string;
+          transfer_date: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount: number;
+          created_at?: string;
+          deleted_at?: string | null;
+          description: string;
+          destination_account_id: string;
+          id?: string;
+          idempotency_key: string;
+          notes?: string | null;
+          revision?: number;
+          source_account_id: string;
+          transfer_date: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Update: {
+          amount?: number;
+          created_at?: string;
+          deleted_at?: string | null;
+          description?: string;
+          destination_account_id?: string;
+          id?: string;
+          idempotency_key?: string;
+          notes?: string | null;
+          revision?: number;
+          source_account_id?: string;
+          transfer_date?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "account_transfers_destination_account_id_fkey";
+            columns: ["destination_account_id"];
+            isOneToOne: false;
+            referencedRelation: "payment_methods";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "account_transfers_source_account_id_fkey";
+            columns: ["source_account_id"];
+            isOneToOne: false;
+            referencedRelation: "payment_methods";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       account_balance_entries: {
         Row: {
           amount: number;
@@ -258,6 +321,166 @@ export type Database = {
           user_id?: string;
         };
         Relationships: [];
+      };
+      installment_occurrences: {
+        Row: {
+          amount: number;
+          created_at: string;
+          deleted_at: string | null;
+          due_date: string;
+          external_reference: string | null;
+          id: string;
+          installment_number: number;
+          plan_id: string;
+          settled_at: string | null;
+          status: string;
+          transaction_id: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          amount: number;
+          created_at?: string;
+          deleted_at?: string | null;
+          due_date: string;
+          external_reference?: string | null;
+          id?: string;
+          installment_number: number;
+          plan_id: string;
+          settled_at?: string | null;
+          status: string;
+          transaction_id?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Update: {
+          amount?: number;
+          created_at?: string;
+          deleted_at?: string | null;
+          due_date?: string;
+          external_reference?: string | null;
+          id?: string;
+          installment_number?: number;
+          plan_id?: string;
+          settled_at?: string | null;
+          status?: string;
+          transaction_id?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "installment_occurrences_plan_owner_fk";
+            columns: ["user_id", "plan_id"];
+            isOneToOne: false;
+            referencedRelation: "installment_plans";
+            referencedColumns: ["user_id", "id"];
+          },
+          {
+            foreignKeyName: "installment_occurrences_transaction_id_fkey";
+            columns: ["transaction_id"];
+            isOneToOne: true;
+            referencedRelation: "transactions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      installment_plans: {
+        Row: {
+          amount_mode: string;
+          category_id: string;
+          completed_at: string | null;
+          created_at: string;
+          current_installment: number;
+          current_occurrence_date: string;
+          deleted_at: string | null;
+          description: string;
+          entered_amount: number;
+          id: string;
+          idempotency_key: string;
+          installment_amount: number;
+          linked_fixed_commitment_id: string | null;
+          original_purchase_date: string | null;
+          payment_method_id: string;
+          request_fingerprint: string;
+          status: string;
+          total_amount: number;
+          total_installments: number;
+          updated_at: string;
+          user_id: string;
+          version: number;
+        };
+        Insert: {
+          amount_mode: string;
+          category_id: string;
+          completed_at?: string | null;
+          created_at?: string;
+          current_installment: number;
+          current_occurrence_date: string;
+          deleted_at?: string | null;
+          description: string;
+          entered_amount: number;
+          id?: string;
+          idempotency_key: string;
+          installment_amount: number;
+          linked_fixed_commitment_id?: string | null;
+          original_purchase_date?: string | null;
+          payment_method_id: string;
+          request_fingerprint: string;
+          status?: string;
+          total_amount: number;
+          total_installments: number;
+          updated_at?: string;
+          user_id?: string;
+          version?: number;
+        };
+        Update: {
+          amount_mode?: string;
+          category_id?: string;
+          completed_at?: string | null;
+          created_at?: string;
+          current_installment?: number;
+          current_occurrence_date?: string;
+          deleted_at?: string | null;
+          description?: string;
+          entered_amount?: number;
+          id?: string;
+          idempotency_key?: string;
+          installment_amount?: number;
+          linked_fixed_commitment_id?: string | null;
+          original_purchase_date?: string | null;
+          payment_method_id?: string;
+          request_fingerprint?: string;
+          status?: string;
+          total_amount?: number;
+          total_installments?: number;
+          updated_at?: string;
+          user_id?: string;
+          version?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "installment_plans_category_id_fkey";
+            columns: ["category_id"];
+            isOneToOne: false;
+            referencedRelation: "categories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "installment_plans_linked_fixed_commitment_id_fkey";
+            columns: ["linked_fixed_commitment_id"];
+            isOneToOne: false;
+            referencedRelation: "fixed_commitments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "installment_plans_payment_method_id_fkey";
+            columns: ["payment_method_id"];
+            isOneToOne: false;
+            referencedRelation: "payment_methods";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       installment_retirement_allocations: {
         Row: {
@@ -598,6 +821,9 @@ export type Database = {
           notes: string | null;
           payment_method_id: string | null;
           related_invoice_id: string | null;
+          related_transaction_id: string | null;
+          transfer_id: string | null;
+          transfer_side: string | null;
           updated_at: string;
           user_id: string;
         };
@@ -627,6 +853,9 @@ export type Database = {
           notes?: string | null;
           payment_method_id?: string | null;
           related_invoice_id?: string | null;
+          related_transaction_id?: string | null;
+          transfer_id?: string | null;
+          transfer_side?: string | null;
           updated_at?: string;
           user_id?: string;
         };
@@ -656,15 +885,32 @@ export type Database = {
           notes?: string | null;
           payment_method_id?: string | null;
           related_invoice_id?: string | null;
+          related_transaction_id?: string | null;
+          transfer_id?: string | null;
+          transfer_side?: string | null;
           updated_at?: string;
           user_id?: string;
         };
         Relationships: [
           {
+            foreignKeyName: "transactions_transfer_id_fkey";
+            columns: ["transfer_id"];
+            isOneToOne: false;
+            referencedRelation: "account_transfers";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "transactions_category_id_fkey";
             columns: ["category_id"];
             isOneToOne: false;
             referencedRelation: "categories";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "transactions_related_transaction_id_fkey";
+            columns: ["related_transaction_id"];
+            isOneToOne: false;
+            referencedRelation: "transactions";
             referencedColumns: ["id"];
           },
           {
@@ -771,6 +1017,75 @@ export type Database = {
         Args: { p_selected_month: string };
         Returns: number;
       };
+      create_account_transfer: {
+        Args: {
+          p_amount: number;
+          p_description: string;
+          p_destination_account_id: string;
+          p_idempotency_key: string;
+          p_notes: string | null;
+          p_source_account_id: string;
+          p_transfer_date: string;
+          p_transfer_id: string;
+        };
+        Returns: {
+          created_transfer_id: string;
+          current_revision: number;
+          replayed: boolean;
+        }[];
+      };
+      create_installment_plan: {
+        Args: {
+          p_amount_mode: string;
+          p_category_id: string;
+          p_counts_toward_fun_money: boolean;
+          p_create_transaction: boolean;
+          p_current_installment: number;
+          p_current_occurrence_date: string;
+          p_description: string;
+          p_entered_amount: number;
+          p_idempotency_key: string;
+          p_installment_amount: number;
+          p_linked_fixed_commitment_id: string | null;
+          p_notes: string | null;
+          p_occurrences: Json;
+          p_payment_method_id: string;
+          p_plan_id: string;
+          p_request_fingerprint: string;
+          p_total_amount: number;
+          p_total_installments: number;
+          p_transaction_id: string;
+        };
+        Returns: {
+          created_plan_id: string;
+          created_transaction_id: string;
+          replayed: boolean;
+        }[];
+      };
+      create_reimbursement: {
+        Args: {
+          p_amount: number;
+          p_date: string;
+          p_description: string;
+          p_idempotency_key: string;
+          p_notes: string | null;
+          p_original_transaction_id: string;
+          p_payment_method_id: string | null;
+          p_transaction_id: string;
+        };
+        Returns: {
+          created_transaction_id: string;
+          replayed: boolean;
+        }[];
+      };
+      delete_installment: {
+        Args: { p_plan_id: string };
+        Returns: string;
+      };
+      delete_account_transfer: {
+        Args: { p_expected_revision: number; p_transfer_id: string };
+        Returns: number;
+      };
       delete_payment_method_if_empty: {
         Args: { p_payment_method_id: string };
         Returns: boolean;
@@ -792,6 +1107,52 @@ export type Database = {
           p_idempotency_key: string;
           p_note: string | null;
           p_sinking_fund_id: string;
+        };
+        Returns: number;
+      };
+      preview_delete_installment: {
+        Args: { p_plan_id: string };
+        Returns: Json;
+      };
+      preview_account_transfer: {
+        Args: {
+          p_amount: number;
+          p_destination_account_id: string;
+          p_expected_revision: number | null;
+          p_source_account_id: string;
+          p_transfer_date: string;
+          p_transfer_id: string | null;
+        };
+        Returns: Json;
+      };
+      preview_installment_commitment_conversion: {
+        Args: {
+          p_category_id: string | null;
+          p_current_occurrence_date: string;
+          p_fixed_commitment_id: string;
+          p_installment_amount: number;
+          p_payment_method_id: string | null;
+        };
+        Returns: Json;
+      };
+      restore_installment: {
+        Args: { p_plan_id: string };
+        Returns: string;
+      };
+      restore_account_transfer: {
+        Args: { p_expected_revision: number; p_transfer_id: string };
+        Returns: number;
+      };
+      update_account_transfer: {
+        Args: {
+          p_amount: number;
+          p_description: string;
+          p_destination_account_id: string;
+          p_expected_revision: number;
+          p_notes: string | null;
+          p_source_account_id: string;
+          p_transfer_date: string;
+          p_transfer_id: string;
         };
         Returns: number;
       };

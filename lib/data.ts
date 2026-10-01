@@ -1,6 +1,6 @@
 export type TransactionType = "income" | "expense" | "saving";
 export type TransactionEntryKind =
-  "purchase" | "repayment" | "refund" | "transfer";
+  "purchase" | "repayment" | "refund" | "reimbursement" | "transfer";
 export type TransactionGroup = "needs" | "wants" | "savings" | "income";
 export type InstallmentAmountMode = "per_installment" | "total";
 
@@ -24,6 +24,9 @@ export interface Transaction {
   paymentMethodClosingDay?: number | null;
   paymentMethodType?: string | null;
   relatedInvoiceId?: string | null;
+  relatedTransactionId?: string | null;
+  transferId?: string | null;
+  transferSide?: "out" | "in" | null;
   fixedCommitmentId?: string | null;
   isPlanned?: boolean;
   isCreditCardInvoice?: boolean;

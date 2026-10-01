@@ -3,19 +3,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   claimMcpIdempotency,
   completeMcpIdempotency,
+  failMcpIdempotency,
   recordMcpMutationAudit,
   requestFingerprint,
   deriveMcpEntityId,
   createFixedCommitment,
   updateFixedCommitment,
+  createAccountTransferWithResult,
+  createReimbursementWithResult,
+  deleteAccountTransfer,
+  restoreAccountTransfer,
+  updateAccountTransfer,
+  addAccountBalanceAdjustment,
+  listAccountBalances,
+  setAccountOpeningBalance,
 } = vi.hoisted(() => ({
   claimMcpIdempotency: vi.fn(),
   completeMcpIdempotency: vi.fn(),
+  failMcpIdempotency: vi.fn(),
   recordMcpMutationAudit: vi.fn(),
   requestFingerprint: vi.fn(),
   deriveMcpEntityId: vi.fn(),
   createFixedCommitment: vi.fn(),
   updateFixedCommitment: vi.fn(),
+  createAccountTransferWithResult: vi.fn(),
+  createReimbursementWithResult: vi.fn(),
+  deleteAccountTransfer: vi.fn(),
+  restoreAccountTransfer: vi.fn(),
+  updateAccountTransfer: vi.fn(),
+  addAccountBalanceAdjustment: vi.fn(),
+  listAccountBalances: vi.fn(),
+  setAccountOpeningBalance: vi.fn(),
 }));
 
 vi.mock("@/lib/finance/catwallet", async (importOriginal) => ({
@@ -24,23 +42,46 @@ vi.mock("@/lib/finance/catwallet", async (importOriginal) => ({
   updateFixedCommitment,
 }));
 
+vi.mock("@/lib/finance/transactions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/finance/transactions")>()),
+  createAccountTransferWithResult,
+  createReimbursementWithResult,
+  deleteAccountTransfer,
+  restoreAccountTransfer,
+  updateAccountTransfer,
+}));
+
+vi.mock("@/lib/finance/account-balances", () => ({
+  addAccountBalanceAdjustment,
+  listAccountBalances,
+  setAccountOpeningBalance,
+}));
+
 vi.mock("@/mcp/idempotency", () => ({
   claimMcpIdempotency,
   completeMcpIdempotency,
   deriveMcpEntityId,
-  failMcpIdempotency: vi.fn(),
+  failMcpIdempotency,
   recordMcpMutationAudit,
   requestFingerprint,
 }));
 
 import {
+  createAccountTransferMutation,
   createFixedCommitmentMutation,
+  createReimbursementMutation,
+  addBalanceAdjustmentMutation,
+  deleteAccountTransferMutation,
   deleteTransactionMutation,
   recordSinkingFundEntryMutation,
+  restoreAccountTransferMutation,
+  setOpeningBalanceMutation,
   setMonthlyBudgetMutation,
+  updateAccountTransferMutation,
   updateFixedCommitmentMutation,
   undoTransactionImport,
 } from "@/mcp/butler-mutations";
+import { McpToolError } from "@/mcp/response";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const ENTITY_ID = "22222222-2222-4222-8222-222222222222";
@@ -77,9 +118,222 @@ describe("Butler budget mutations", () => {
       replayed: false,
     });
     completeMcpIdempotency.mockResolvedValue(undefined);
+    failMcpIdempotency.mockResolvedValue(undefined);
     recordMcpMutationAudit.mockResolvedValue(undefined);
     requestFingerprint.mockReturnValue("b".repeat(64));
     deriveMcpEntityId.mockReturnValue(ENTITY_ID);
+    createAccountTransferWithResult.mockResolvedValue({
+      revision: 1,
+      transferId: ENTITY_ID,
+    });
+    createReimbursementWithResult.mockResolvedValue({
+      transactionId: ENTITY_ID,
+    });
+    updateAccountTransfer.mockResolvedValue(2);
+    deleteAccountTransfer.mockResolvedValue(2);
+    restoreAccountTransfer.mockResolvedValue(3);
+    addAccountBalanceAdjustment.mockResolvedValue(undefined);
+    listAccountBalances.mockResolvedValue([{ id: ENTITY_ID }]);
+    setAccountOpeningBalance.mockResolvedValue(undefined);
+  });
+
+  it("returns the persisted account after balance mutations", async () => {
+    const input = {
+      amount: 100,
+      effectiveDate: "2026-09-30",
+      idempotencyKey: "balance-key",
+      paymentAccountId: ENTITY_ID,
+    };
+    await expect(
+      setOpeningBalanceMutation(input, context()),
+    ).resolves.toMatchObject({
+      result: { id: ENTITY_ID },
+    });
+    await expect(
+      addBalanceAdjustmentMutation({ ...input, note: "Correction" }, context()),
+    ).resolves.toMatchObject({ result: { id: ENTITY_ID } });
+  });
+
+  it("rejects balance mutations when the owned account disappears", async () => {
+    const input = {
+      amount: 100,
+      effectiveDate: "2026-09-30",
+      idempotencyKey: "balance-key",
+      paymentAccountId: ENTITY_ID,
+    };
+    listAccountBalances.mockResolvedValue([]);
+    await expect(
+      setOpeningBalanceMutation(input, context()),
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      addBalanceAdjustmentMutation({ ...input, note: null }, context()),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("returns a replay without rerunning a linked ledger mutation", async () => {
+    claimMcpIdempotency.mockResolvedValue({
+      entityId: ENTITY_ID,
+      idempotencyKeyHash: "a".repeat(64),
+      replayed: true,
+    });
+    recordMcpMutationAudit.mockRejectedValueOnce(
+      new Error("audit unavailable"),
+    );
+
+    await expect(
+      createAccountTransferMutation(
+        {
+          amount: 175,
+          date: "2026-09-30",
+          description: "Move funds",
+          destinationAccountId: ENTITY_ID,
+          idempotencyKey: "transfer-key",
+          sourceAccountId: USER_ID,
+        },
+        context(),
+      ),
+    ).resolves.toMatchObject({
+      entityId: ENTITY_ID,
+      idempotencyResult: "replayed",
+    });
+    expect(createAccountTransferWithResult).not.toHaveBeenCalled();
+  });
+
+  it("rejects an incomplete replay record", async () => {
+    claimMcpIdempotency.mockResolvedValue({
+      entityId: null,
+      idempotencyKeyHash: "a".repeat(64),
+      replayed: true,
+    });
+
+    await expect(
+      createAccountTransferMutation(
+        {
+          amount: 175,
+          date: "2026-09-30",
+          description: "Move funds",
+          destinationAccountId: ENTITY_ID,
+          idempotencyKey: "transfer-key",
+          sourceAccountId: USER_ID,
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "INTERNAL_ERROR" });
+  });
+
+  it.each([
+    [new Error("record not found"), "NOT_FOUND"],
+    [new Error("record already exists"), "CONFLICT"],
+    [new Error("amount is invalid"), "INVALID_INPUT"],
+    [new Error("value is required"), "INVALID_INPUT"],
+    [new Error("unexpected storage error"), "INTERNAL_ERROR"],
+    [new McpToolError("CONFLICT", "conflict"), "CONFLICT"],
+  ])(
+    "maps linked ledger service failures without exposing details",
+    async (error, code) => {
+      createAccountTransferWithResult.mockRejectedValueOnce(error);
+      failMcpIdempotency.mockRejectedValueOnce(
+        new Error("cleanup unavailable"),
+      );
+      recordMcpMutationAudit.mockRejectedValueOnce(
+        new Error("audit unavailable"),
+      );
+
+      await expect(
+        createAccountTransferMutation(
+          {
+            amount: 175,
+            date: "2026-09-30",
+            description: "Move funds",
+            destinationAccountId: ENTITY_ID,
+            idempotencyKey: `transfer-${code}`,
+            sourceAccountId: USER_ID,
+          },
+          context(),
+        ),
+      ).rejects.toMatchObject({ code });
+    },
+  );
+
+  it("preserves an idempotency completion failure after a successful write", async () => {
+    const completionError = new Error("completion unavailable");
+    completeMcpIdempotency.mockRejectedValueOnce(completionError);
+    recordMcpMutationAudit.mockRejectedValueOnce(
+      new Error("audit unavailable"),
+    );
+
+    await expect(
+      createAccountTransferMutation(
+        {
+          amount: 175,
+          date: "2026-09-30",
+          description: "Move funds",
+          destinationAccountId: ENTITY_ID,
+          idempotencyKey: "transfer-key",
+          sourceAccountId: USER_ID,
+        },
+        context(),
+      ),
+    ).rejects.toBe(completionError);
+  });
+
+  it("maps linked ledger mutations to owner-scoped finance services", async () => {
+    const transfer = {
+      amount: 175,
+      date: "2026-09-30",
+      description: "Move funds",
+      destinationAccountId: ENTITY_ID,
+      expectedRevision: 1,
+      id: ENTITY_ID,
+      idempotencyKey: "transfer-key",
+      sourceAccountId: USER_ID,
+    };
+    await createAccountTransferMutation(transfer, context());
+    await updateAccountTransferMutation(transfer, context());
+    await deleteAccountTransferMutation(transfer, context());
+    await restoreAccountTransferMutation(
+      { ...transfer, expectedRevision: 2 },
+      context(),
+    );
+    await createReimbursementMutation(
+      {
+        amount: 50.6,
+        date: "2026-09-30",
+        description: "Shared order reimbursement",
+        idempotencyKey: "reimbursement-key",
+        originalTransactionId: ENTITY_ID,
+        paymentAccountId: USER_ID,
+      },
+      context(),
+    );
+
+    expect(createAccountTransferWithResult).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: ENTITY_ID }),
+      expect.anything(),
+    );
+    expect(updateAccountTransfer).toHaveBeenCalledWith(
+      transfer,
+      expect.anything(),
+    );
+    expect(deleteAccountTransfer).toHaveBeenCalledWith(
+      ENTITY_ID,
+      1,
+      expect.anything(),
+    );
+    expect(restoreAccountTransfer).toHaveBeenCalledWith(
+      ENTITY_ID,
+      2,
+      expect.anything(),
+    );
+    expect(createReimbursementWithResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: ENTITY_ID,
+        paymentMethod: USER_ID,
+      }),
+      expect.anything(),
+    );
   });
 
   it("stores a UUID result entity for monthly budget idempotency", async () => {

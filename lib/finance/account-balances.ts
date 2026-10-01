@@ -17,7 +17,8 @@ import {
 export type AccountBalanceTransaction = {
   amount: number | string;
   date: string;
-  entryKind?: "purchase" | "repayment" | "refund" | "transfer" | null;
+  entryKind?:
+    "purchase" | "repayment" | "refund" | "reimbursement" | "transfer" | null;
   kind: "expense" | "income" | "saving";
   installmentCompletedAt?: string | null;
   installmentGroupId?: string | null;

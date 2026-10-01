@@ -11,6 +11,7 @@ import {
   getUserContext,
 } from "@/lib/finance/transactions";
 import { getCoolingItem } from "@/lib/finance/cooling";
+import { listFixedCommitments } from "@/lib/finance/catwallet";
 
 type NewTransactionPageProps = {
   readonly searchParams?: Promise<{
@@ -41,9 +42,10 @@ export default async function NewTransactionPage({
   const userContext = await getUserContext(supabase);
   const resolvedSearchParams = await searchParams;
   const coolingItemId = resolveCoolingItemId(resolvedSearchParams?.coolingItem);
-  const [formOptions, coolingItem] = await Promise.all([
+  const [formOptions, coolingItem, fixedCommitments] = await Promise.all([
     getTransactionFormOptions({ userContext }),
     coolingItemId ? getCoolingItem(coolingItemId, userContext) : null,
+    listFixedCommitments(userContext),
   ]);
 
   return (
@@ -60,6 +62,11 @@ export default async function NewTransactionPage({
             : undefined
         }
         createCategoryAction={createCategoryAction}
+        fixedCommitments={fixedCommitments.map(({ amount, id, name }) => ({
+          amount,
+          id,
+          name,
+        }))}
         onSubmit={createTransactionAction}
         paymentMethods={formOptions.paymentMethods}
         successRedirect="/dashboard"

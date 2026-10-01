@@ -1546,22 +1546,32 @@ describe("local CatWallet monthly report", () => {
         throw new Error("Monthly report transactions missing");
       transactionIds = transactions.data.map((row) => row.id);
 
-      const purchasedCooling = await createCoolingItem(
-        { amountCents: 80000, name: "Monthly report purchase" },
-        reportContext,
-      );
-      coolingItemIds = [purchasedCooling.id];
-      await markCoolingItemPurchased(
-        purchasedCooling.id,
-        transactions.data.at(-1)!.id,
-        reportContext,
-      );
-      const abandonedCooling = await createCoolingItem(
-        { amountCents: 50000, name: "Monthly report abandoned" },
-        reportContext,
-      );
-      coolingItemIds.push(abandonedCooling.id);
-      await abandonCoolingItem(abandonedCooling.id, reportContext);
+      const coolingItems = await reportClient
+        .from("cooling_items")
+        .insert([
+          {
+            added_at: "2026-09-06T00:00:00.000Z",
+            amount_cents: 80_000,
+            cooling_days: 7,
+            name: "Monthly report purchase",
+            purchased_transaction_id: transactions.data.at(-1)!.id,
+            status: "purchased",
+            updated_at: "2026-09-07T00:00:00.000Z",
+          },
+          {
+            added_at: "2026-09-08T00:00:00.000Z",
+            amount_cents: 50_000,
+            cooling_days: 7,
+            name: "Monthly report abandoned",
+            status: "abandoned",
+            updated_at: "2026-09-09T00:00:00.000Z",
+          },
+        ])
+        .select("id");
+      expect(coolingItems.error).toBeNull();
+      if (!coolingItems.data)
+        throw new Error("Monthly report cooling items missing");
+      coolingItemIds = coolingItems.data.map((row) => row.id);
 
       const report = await getMonthlyReport(
         reportUser.id,

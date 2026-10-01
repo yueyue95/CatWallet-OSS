@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import {
   isAuthSessionMissingError,
   type SupabaseClient,
@@ -20,7 +22,10 @@ import {
   type TransactionType,
   type InstallmentAmountMode,
 } from "@/lib/data";
-import { buildInstallmentPlan } from "@/lib/finance/installment-plan";
+import {
+  buildActiveInstallmentSchedule,
+  buildInstallmentPlan,
+} from "@/lib/finance/installment-plan";
 import {
   calculateBudgetData,
   sumBudgetUsageByGroup,
@@ -54,7 +59,11 @@ import {
   shouldShowSubscriptionOccurrenceInTransactionHistory,
   type SubscriptionOverviewItem,
 } from "@/lib/finance/subscriptions";
-import { getSpendingAmount } from "@/lib/finance/transaction-semantics";
+import {
+  getIncomeAmount,
+  getPersonalSpendingAmount,
+  getSpendingAmount,
+} from "@/lib/finance/transaction-semantics";
 
 export {
   getSubscriptionMatchKey,
@@ -120,6 +129,9 @@ type TransactionRow = {
   import_batch_id?: string | null;
   entry_kind?: Transaction["entryKind"] | null;
   related_invoice_id?: string | null;
+  related_transaction_id?: string | null;
+  transfer_id?: string | null;
+  transfer_side?: Transaction["transferSide"];
   entry_idempotency_key?: string | null;
   kind: DbTransactionKind;
   installment_group_id?: string | null;
@@ -254,6 +266,7 @@ export type NewTransactionInput = {
   countsTowardFunMoney?: boolean;
   coolingItemId?: string;
   idempotencyKey?: string;
+  existingTransactionId?: string;
 };
 
 export type CreateSubscriptionInput = {
@@ -286,6 +299,57 @@ export type CreateInvoiceAdvancePaymentInput = {
   paymentMethod: string;
 };
 
+export type CreateReimbursementInput = {
+  amount: number;
+  date: string;
+  description: string;
+  idempotencyKey?: string;
+  notes?: string | null;
+  originalTransactionId: string;
+  paymentMethod: string;
+};
+
+export type AccountTransfer = {
+  amount: number;
+  createdAt: string;
+  deletedAt: string | null;
+  description: string;
+  destinationAccountId: string;
+  id: string;
+  idempotencyKey: string;
+  notes: string | null;
+  revision: number;
+  sourceAccountId: string;
+  transferDate: string;
+  updatedAt: string;
+};
+
+export type AccountTransferInput = {
+  amount: number;
+  date: string;
+  description: string;
+  destinationAccountId: string;
+  notes?: string | null;
+  sourceAccountId: string;
+};
+
+export type CreateAccountTransferInput = AccountTransferInput & {
+  idempotencyKey?: string;
+};
+
+export type UpdateAccountTransferInput = AccountTransferInput & {
+  expectedRevision: number;
+  id: string;
+};
+
+export type AccountTransferPreview = {
+  blockers: string[];
+  canApply: boolean;
+  currentRevision: number | null;
+  transferDate: string;
+  transferId: string | null;
+};
+
 export type UpdateTransactionInput = {
   id: string;
   type: TransactionType;
@@ -301,6 +365,27 @@ export type UpdateTransactionInput = {
 export type DeleteInstallmentsInput = {
   scope: InstallmentDeleteScope;
   transactionId: string;
+};
+
+export type InstallmentDeletePreview = {
+  blockers: string[];
+  canDelete: boolean;
+  occurrenceCount: number;
+  planId: string;
+};
+
+export type InstallmentCommitmentConversionPreview = {
+  blockers: string[];
+  canConvert: boolean;
+  fixedCommitmentId: string;
+};
+
+export type PreviewInstallmentCommitmentConversionInput = {
+  categoryId: string;
+  currentOccurrenceDate: string;
+  fixedCommitmentId: string;
+  installmentAmount: number;
+  paymentMethodId: string;
 };
 
 export type AdvanceInstallmentsInput = {
@@ -388,11 +473,13 @@ export type DailyExpensesOverTimeItem = {
 
 export type ReportMonthlyItem = {
   expenses: number;
+  grossExpenses: number;
   grossSavings: number;
   income: number;
   month: string;
   monthKey: string;
   netWorth: number;
+  reimbursedExpenses: number;
   year: string;
 };
 
@@ -403,8 +490,11 @@ export type ReportTransactionItem = {
   description: string;
   entryKind: TransactionEntryKind;
   financialMonth: string;
+  grossAmount: number;
   paymentMethod: string | null;
   purchaseMonth: string | null;
+  reimbursedAmount: number;
+  relatedTransactionId: string | null;
   statementDueDate: string | null;
   statementPeriod: string | null;
   type: TransactionType;
@@ -545,6 +635,9 @@ const transactionSelect = `
   import_batch_id,
   entry_kind,
   related_invoice_id,
+  related_transaction_id,
+  transfer_id,
+  transfer_side,
   entry_idempotency_key,
   notes,
   category_id,
@@ -584,6 +677,9 @@ const transactionSelectWithoutAdvancedMetadata = `
   import_batch_id,
   entry_kind,
   related_invoice_id,
+  related_transaction_id,
+  transfer_id,
+  transfer_side,
   entry_idempotency_key,
   notes,
   category_id,
@@ -726,7 +822,10 @@ function assertNonEmptyString(value: string, label: string, maxLength = 160) {
   return trimmedValue;
 }
 
-function normalizeOptionalString(value: string | undefined, maxLength = 500) {
+function normalizeOptionalString(
+  value: string | null | undefined,
+  maxLength = 500,
+) {
   const trimmedValue = value?.trim();
 
   if (!trimmedValue) {
@@ -1135,6 +1234,9 @@ function toTransaction(row: TransactionRow): Transaction {
     paymentMethodKey,
     paymentMethodType: row.payment_methods?.type ?? null,
     relatedInvoiceId: row.related_invoice_id ?? legacyRepaymentInvoiceId,
+    relatedTransactionId: row.related_transaction_id ?? null,
+    transferId: row.transfer_id ?? null,
+    transferSide: row.transfer_side ?? null,
     type: row.kind,
   };
 }
@@ -1210,19 +1312,28 @@ function getLastMonthKeys(month: string | undefined, count: number) {
 }
 
 function getMonthlyFinanceSummary(transactions: Transaction[]) {
-  const income = transactions
-    .filter((transaction) => transaction.type === "income")
-    .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
-  const expenses = transactions
-    .filter((transaction) => getSpendingAmount(transaction) !== 0)
-    .reduce((sum, transaction) => sum + getSpendingAmount(transaction), 0);
+  const income = transactions.reduce(
+    (sum, transaction) => sum + getIncomeAmount(transaction),
+    0,
+  );
+  const grossExpenses = transactions.reduce(
+    (sum, transaction) => sum + getSpendingAmount(transaction),
+    0,
+  );
+  const expenses = transactions.reduce(
+    (sum, transaction) =>
+      sum + getPersonalSpendingAmount(transaction, transactions),
+    0,
+  );
   const grossSavings = transactions
     .filter((transaction) => transaction.type === "saving")
     .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
   return {
     expenses,
+    grossExpenses,
     grossSavings,
     income,
+    reimbursedExpenses: Number((grossExpenses - expenses).toFixed(2)),
   };
 }
 
@@ -1520,6 +1631,7 @@ function buildPaymentBills(
     .filter(
       (transaction) =>
         transaction.type === "expense" &&
+        transaction.entryKind !== "transfer" &&
         !transaction.isCreditCardInvoice &&
         !getInvoiceAdvancePaymentInvoiceId(transaction) &&
         !transaction.notes?.startsWith("subscription") &&
@@ -2083,6 +2195,150 @@ async function insertTransactionRows(
   throw new Error(`Unable to save transaction: ${error.message}`);
 }
 
+type InstallmentCreationInput = {
+  input: NewTransactionInput;
+  notes: string | null;
+  resolved: ResolvedNewTransactionInput;
+  supabase: SupabaseClient;
+};
+
+function resolveInstallmentRequestIdentity(input: NewTransactionInput) {
+  if (input.existingTransactionId)
+    assertUuid(input.existingTransactionId, "Existing transaction");
+  const transactionId =
+    input.existingTransactionId ?? input.idempotencyKey ?? crypto.randomUUID();
+  assertUuid(transactionId, "Transaction");
+  return {
+    idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+    transactionId,
+  };
+}
+
+function installmentRequestFingerprint(
+  input: NewTransactionInput,
+  resolved: ResolvedNewTransactionInput,
+  notes: string | null,
+) {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        amount: resolved.amount,
+        amountMode: resolved.installmentAmountMode,
+        categoryId: resolved.categoryId,
+        countsTowardFunMoney: resolved.countsTowardFunMoney,
+        currentInstallment: resolved.currentInstallment,
+        date: resolved.date,
+        description: resolved.description,
+        existingTransactionId: input.existingTransactionId ?? null,
+        fixedCommitmentId: resolved.fixedCommitmentId,
+        installmentCount: resolved.installmentCount,
+        notes,
+        paymentMethodId: resolved.paymentMethodId,
+      }),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+function encryptInstallmentNotes(
+  transactionId: string,
+  resolved: ResolvedNewTransactionInput,
+  notes: string | null,
+) {
+  return encryptField(
+    resolveOccurrenceNotes(
+      createInstallmentMetadata({
+        groupId: transactionId,
+        installmentNumber: resolved.currentInstallment,
+        installmentTotal: resolved.installmentCount,
+      }),
+      notes,
+    ),
+  );
+}
+
+function buildInstallmentOccurrencePayload(
+  resolved: ResolvedNewTransactionInput,
+) {
+  return buildActiveInstallmentSchedule({
+    amount: resolved.amount,
+    amountMode: resolved.installmentAmountMode,
+    currentInstallment: resolved.currentInstallment,
+    currentOccurrenceDate: resolved.date,
+    installmentCount: resolved.installmentCount,
+  }).map((occurrence) => ({ ...occurrence, id: crypto.randomUUID() }));
+}
+
+function buildInstallmentRpcArgs({
+  idempotencyKey,
+  input,
+  notes,
+  resolved,
+  transactionId,
+}: Omit<InstallmentCreationInput, "supabase"> & {
+  idempotencyKey: string;
+  transactionId: string;
+}) {
+  if (!resolved.categoryId || !resolved.paymentMethodId) {
+    throw new Error(
+      "Installment purchases require a category and payment method.",
+    );
+  }
+  const computed = buildInstallmentPlan({
+    amount: resolved.amount,
+    amountMode: resolved.installmentAmountMode,
+    currentInstallment: resolved.currentInstallment,
+    installmentCount: resolved.installmentCount,
+  });
+  return {
+    p_amount_mode: resolved.installmentAmountMode,
+    p_category_id: resolved.categoryId as string,
+    p_counts_toward_fun_money: resolved.countsTowardFunMoney,
+    p_create_transaction: !input.existingTransactionId,
+    p_current_installment: resolved.currentInstallment,
+    p_current_occurrence_date: resolved.date,
+    p_description: encryptDescription(resolved.description),
+    p_entered_amount: resolved.amount,
+    p_idempotency_key: idempotencyKey,
+    p_installment_amount: computed.installmentAmount,
+    p_linked_fixed_commitment_id: resolved.fixedCommitmentId,
+    p_notes: encryptInstallmentNotes(transactionId, resolved, notes),
+    p_occurrences: buildInstallmentOccurrencePayload(resolved),
+    p_payment_method_id: resolved.paymentMethodId as string,
+    p_plan_id: crypto.randomUUID(),
+    p_request_fingerprint: installmentRequestFingerprint(
+      input,
+      resolved,
+      notes,
+    ),
+    p_total_amount: computed.totalAmount,
+    p_total_installments: resolved.installmentCount,
+    p_transaction_id: transactionId,
+  };
+}
+
+async function createInstallmentPlanWithResult(
+  context: InstallmentCreationInput,
+): Promise<CreateTransactionServiceResult> {
+  const { input, supabase } = context;
+  const identity = resolveInstallmentRequestIdentity(input);
+  const { data, error } = await supabase.rpc(
+    "create_installment_plan",
+    buildInstallmentRpcArgs({ ...context, ...identity }),
+  );
+  if (error) {
+    throw new Error(`Unable to save installment plan: ${error.message}`);
+  }
+  const result = data?.[0];
+  if (!result?.created_transaction_id) {
+    throw new Error("Unable to save installment plan: no transaction returned");
+  }
+  return {
+    replayed: result.replayed,
+    transactionId: result.created_transaction_id,
+  };
+}
+
 export type CreateTransactionServiceResult = {
   replayed: boolean;
   transactionId: string;
@@ -2109,6 +2365,14 @@ export async function createTransactionWithResult(
     resolved.currentInstallment,
   );
   const notes = normalizeOptionalString(input.notes);
+  if (plan.isInstallmentPurchase) {
+    return createInstallmentPlanWithResult({
+      input,
+      notes,
+      resolved,
+      supabase,
+    });
+  }
   const rows = buildInstallmentTransactionRows({
     resolved,
     plan,
@@ -2133,6 +2397,348 @@ export async function createTransaction(
   userContext?: AuthenticatedUserContext,
 ) {
   return (await createTransactionWithResult(input, userContext)).transactionId;
+}
+
+function resolveReimbursementInput(
+  input: CreateReimbursementInput,
+  createdAt: string | null,
+) {
+  const amount = Math.abs(input.amount);
+  assertPositiveFiniteAmount(amount, "Amount");
+  const date = toIsoDate(input.date);
+  assertValidIsoDate(date);
+  assertDateNotBeforeUserCreated(date, createdAt);
+  const description = assertNonEmptyString(
+    input.description,
+    "Reimbursement description",
+  );
+  const originalTransactionId = input.originalTransactionId.trim();
+  assertUuid(originalTransactionId, "Original transaction");
+  const paymentMethodId = normalizeNullableId(
+    input.paymentMethod,
+    "Payment method",
+  );
+  const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID();
+  assertUuid(idempotencyKey, "Idempotency key");
+
+  return {
+    amount,
+    date,
+    description,
+    idempotencyKey,
+    originalTransactionId,
+    paymentMethodId,
+  };
+}
+
+export async function createReimbursementWithResult(
+  input: CreateReimbursementInput,
+  userContext?: AuthenticatedUserContext,
+): Promise<CreateTransactionServiceResult> {
+  const { createdAt, supabase, userId } =
+    userContext ?? (await getUserContext());
+  const resolved = resolveReimbursementInput(input, createdAt);
+  const { paymentMethodId } = resolved;
+  await assertUserPaymentMethod(supabase, userId, paymentMethodId);
+
+  const { data, error } = await supabase.rpc("create_reimbursement", {
+    p_amount: resolved.amount,
+    p_date: resolved.date,
+    p_description: encryptDescription(resolved.description),
+    p_idempotency_key: resolved.idempotencyKey,
+    p_notes: encryptField(normalizeOptionalString(input.notes)),
+    p_original_transaction_id: resolved.originalTransactionId,
+    p_payment_method_id: paymentMethodId,
+    p_transaction_id: resolved.idempotencyKey,
+  });
+  if (error) {
+    throw new Error(`Unable to save reimbursement: ${error.message}`);
+  }
+  const result = data?.[0];
+  if (!result?.created_transaction_id) {
+    throw new Error("Unable to save reimbursement: no transaction returned");
+  }
+  return {
+    replayed: result.replayed,
+    transactionId: result.created_transaction_id,
+  };
+}
+
+function resolveAccountTransferInput(
+  input: AccountTransferInput,
+  createdAt: string | null,
+) {
+  const amount = Math.abs(input.amount);
+  assertPositiveFiniteAmount(amount, "Amount");
+  if (Number(amount.toFixed(2)) !== amount) {
+    throw new Error("Amount must have at most two decimal places.");
+  }
+  const date = toIsoDate(input.date);
+  assertValidIsoDate(date);
+  assertDateNotBeforeUserCreated(date, createdAt);
+  assertUuid(input.sourceAccountId, "Source account");
+  assertUuid(input.destinationAccountId, "Destination account");
+  if (input.sourceAccountId === input.destinationAccountId) {
+    throw new Error("Source and destination accounts must be different.");
+  }
+  return {
+    amount,
+    date,
+    description: assertNonEmptyString(input.description, "Description"),
+    destinationAccountId: input.destinationAccountId,
+    notes: normalizeOptionalString(input.notes),
+    sourceAccountId: input.sourceAccountId,
+  };
+}
+
+function parseAccountTransferPreview(value: unknown): AccountTransferPreview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Unable to preview account transfer.");
+  }
+  const preview = value as Record<string, unknown>;
+  if (
+    typeof preview.canApply !== "boolean" ||
+    !Array.isArray(preview.blockers) ||
+    !preview.blockers.every((blocker) => typeof blocker === "string") ||
+    typeof preview.transferDate !== "string"
+  ) {
+    throw new Error("Unable to preview account transfer.");
+  }
+  return preview as AccountTransferPreview;
+}
+
+async function previewResolvedAccountTransfer({
+  expectedRevision,
+  resolved,
+  transferId,
+  userContext,
+}: {
+  expectedRevision: number | null;
+  resolved: ReturnType<typeof resolveAccountTransferInput>;
+  transferId: string | null;
+  userContext: AuthenticatedUserContext;
+}) {
+  const { data, error } = await userContext.supabase.rpc(
+    "preview_account_transfer",
+    {
+      p_amount: resolved.amount,
+      p_destination_account_id: resolved.destinationAccountId,
+      p_expected_revision: expectedRevision,
+      p_source_account_id: resolved.sourceAccountId,
+      p_transfer_date: resolved.date,
+      p_transfer_id: transferId,
+    },
+  );
+  if (error) {
+    throw new Error(`Unable to preview account transfer: ${error.message}`);
+  }
+  return parseAccountTransferPreview(data);
+}
+
+export async function previewAccountTransfer(
+  input: AccountTransferInput & {
+    expectedRevision?: number;
+    id?: string;
+  },
+  userContext?: AuthenticatedUserContext,
+) {
+  const context = userContext ?? (await getUserContext());
+  if (input.id) assertUuid(input.id, "Account transfer");
+  const resolved = resolveAccountTransferInput(input, context.createdAt);
+  return previewResolvedAccountTransfer({
+    expectedRevision: input.expectedRevision ?? null,
+    resolved,
+    transferId: input.id ?? null,
+    userContext: context,
+  });
+}
+
+export async function createAccountTransferWithResult(
+  input: CreateAccountTransferInput,
+  userContext?: AuthenticatedUserContext,
+) {
+  const context = userContext ?? (await getUserContext());
+  const resolved = resolveAccountTransferInput(input, context.createdAt);
+  const idempotencyKey = input.idempotencyKey ?? crypto.randomUUID();
+  assertUuid(idempotencyKey, "Idempotency key");
+  const { data, error } = await context.supabase.rpc(
+    "create_account_transfer",
+    {
+      p_amount: resolved.amount,
+      p_description: encryptDescription(resolved.description),
+      p_destination_account_id: resolved.destinationAccountId,
+      p_idempotency_key: idempotencyKey,
+      p_notes: encryptField(resolved.notes),
+      p_source_account_id: resolved.sourceAccountId,
+      p_transfer_date: resolved.date,
+      p_transfer_id: idempotencyKey,
+    },
+  );
+  if (error) {
+    throw new Error(`Unable to save account transfer: ${error.message}`);
+  }
+  const result = data?.[0];
+  if (!result?.created_transfer_id) {
+    throw new Error("Unable to save account transfer: no transfer returned");
+  }
+  return {
+    replayed: result.replayed,
+    revision: result.current_revision,
+    transferId: result.created_transfer_id,
+  };
+}
+
+export async function updateAccountTransfer(
+  input: UpdateAccountTransferInput,
+  userContext?: AuthenticatedUserContext,
+) {
+  assertUuid(input.id, "Account transfer");
+  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    throw new Error("Transfer revision is invalid.");
+  }
+  const context = userContext ?? (await getUserContext());
+  const resolved = resolveAccountTransferInput(input, context.createdAt);
+  const { data, error } = await context.supabase.rpc(
+    "update_account_transfer",
+    {
+      p_amount: resolved.amount,
+      p_description: encryptDescription(resolved.description),
+      p_destination_account_id: resolved.destinationAccountId,
+      p_expected_revision: input.expectedRevision,
+      p_notes: encryptField(resolved.notes),
+      p_source_account_id: resolved.sourceAccountId,
+      p_transfer_date: resolved.date,
+      p_transfer_id: input.id,
+    },
+  );
+  if (error) {
+    throw new Error(`Unable to update account transfer: ${error.message}`);
+  }
+  return data;
+}
+
+async function runAccountTransferLifecycleRpc({
+  expectedRevision,
+  operation,
+  transferId,
+  userContext,
+}: {
+  expectedRevision: number;
+  operation: "delete" | "restore";
+  transferId: string;
+  userContext?: AuthenticatedUserContext;
+}) {
+  assertUuid(transferId, "Account transfer");
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 1) {
+    throw new Error("Transfer revision is invalid.");
+  }
+  const { supabase } = userContext ?? (await getUserContext());
+  const functionName =
+    operation === "delete"
+      ? "delete_account_transfer"
+      : "restore_account_transfer";
+  const { data, error } = await supabase.rpc(functionName, {
+    p_expected_revision: expectedRevision,
+    p_transfer_id: transferId,
+  });
+  if (error) {
+    throw new Error(
+      `Unable to ${operation} account transfer: ${error.message}`,
+    );
+  }
+  return data;
+}
+
+export async function deleteAccountTransfer(
+  transferId: string,
+  expectedRevision: number,
+  userContext?: AuthenticatedUserContext,
+) {
+  return runAccountTransferLifecycleRpc({
+    operation: "delete",
+    transferId,
+    expectedRevision,
+    userContext,
+  });
+}
+
+export async function restoreAccountTransfer(
+  transferId: string,
+  expectedRevision: number,
+  userContext?: AuthenticatedUserContext,
+) {
+  return runAccountTransferLifecycleRpc({
+    operation: "restore",
+    transferId,
+    expectedRevision,
+    userContext,
+  });
+}
+
+export async function listAccountTransfers(options?: {
+  includeDeleted?: boolean;
+  userContext?: AuthenticatedUserContext;
+}): Promise<AccountTransfer[]> {
+  const { supabase, userId } = options?.userContext ?? (await getUserContext());
+  let query = supabase
+    .from("account_transfers")
+    .select(
+      "id, source_account_id, destination_account_id, amount, transfer_date, description, notes, idempotency_key, revision, created_at, updated_at, deleted_at",
+    )
+    .eq("user_id", userId)
+    .order("transfer_date", { ascending: false });
+  if (!options?.includeDeleted) query = query.is("deleted_at", null);
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(`Unable to load account transfers: ${error.message}`);
+  }
+  return (data ?? []).map((row) => ({
+    amount: Number(row.amount),
+    createdAt: row.created_at,
+    deletedAt: row.deleted_at,
+    description: decryptDescription(row.description)!,
+    destinationAccountId: row.destination_account_id,
+    id: row.id,
+    idempotencyKey: row.idempotency_key,
+    notes: decryptField(row.notes),
+    revision: row.revision,
+    sourceAccountId: row.source_account_id,
+    transferDate: row.transfer_date,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function previewInstallmentCommitmentConversion(
+  input: PreviewInstallmentCommitmentConversionInput,
+  userContext?: AuthenticatedUserContext,
+): Promise<InstallmentCommitmentConversionPreview> {
+  const { supabase } = userContext ?? (await getUserContext());
+  assertUuid(input.fixedCommitmentId, "Fixed commitment");
+  const categoryId = normalizeNullableId(input.categoryId, "Category");
+  const paymentMethodId = normalizeNullableId(
+    input.paymentMethodId,
+    "Payment method",
+  );
+  assertPositiveFiniteAmount(input.installmentAmount, "Installment amount");
+  const currentOccurrenceDate = toIsoDate(input.currentOccurrenceDate);
+  assertValidIsoDate(currentOccurrenceDate);
+
+  const { data, error } = await supabase.rpc(
+    "preview_installment_commitment_conversion",
+    {
+      p_category_id: categoryId,
+      p_current_occurrence_date: currentOccurrenceDate,
+      p_fixed_commitment_id: input.fixedCommitmentId,
+      p_installment_amount: input.installmentAmount,
+      p_payment_method_id: paymentMethodId,
+    },
+  );
+  if (error) {
+    throw new Error(
+      `Unable to preview installment commitment conversion: ${error.message}`,
+    );
+  }
+  return data as unknown as InstallmentCommitmentConversionPreview;
 }
 
 export async function createTransactionsBatchWithResult(
@@ -3179,6 +3785,67 @@ export async function deleteTransaction(
   await setTransactionDeletedState(transactionId, true, userContext);
 }
 
+function parseInstallmentDeletePreview(
+  value: unknown,
+): InstallmentDeletePreview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Unable to preview installment deletion.");
+  }
+  const preview = value as Record<string, unknown>;
+  if (
+    typeof preview.planId !== "string" ||
+    typeof preview.canDelete !== "boolean" ||
+    typeof preview.occurrenceCount !== "number" ||
+    !Array.isArray(preview.blockers) ||
+    !preview.blockers.every((blocker) => typeof blocker === "string")
+  ) {
+    throw new Error("Unable to preview installment deletion.");
+  }
+  return preview as InstallmentDeletePreview;
+}
+
+export async function previewDeleteInstallment(
+  planId: string,
+  userContext?: AuthenticatedUserContext,
+) {
+  assertUuid(planId, "Installment plan");
+  const { supabase } = userContext ?? (await getUserContext());
+  const { data, error } = await supabase.rpc("preview_delete_installment", {
+    p_plan_id: planId,
+  });
+  if (error)
+    throw new Error(`Unable to preview installment deletion: ${error.message}`);
+  return parseInstallmentDeletePreview(data);
+}
+
+async function runInstallmentLifecycleRpc(
+  operation: "delete" | "restore",
+  planId: string,
+  userContext?: AuthenticatedUserContext,
+) {
+  assertUuid(planId, "Installment plan");
+  const { supabase } = userContext ?? (await getUserContext());
+  const functionName =
+    operation === "delete" ? "delete_installment" : "restore_installment";
+  const { error } = await supabase.rpc(functionName, { p_plan_id: planId });
+  if (error)
+    throw new Error(`Unable to ${operation} installment: ${error.message}`);
+}
+
+export async function deleteInstallment(
+  planId: string,
+  userContext?: AuthenticatedUserContext,
+) {
+  await runInstallmentLifecycleRpc("delete", planId, userContext);
+}
+
+export async function restoreInstallment(
+  planId: string,
+  userContext?: AuthenticatedUserContext,
+) {
+  await runInstallmentLifecycleRpc("restore", planId, userContext);
+}
+
 export async function restoreTransaction(
   transactionId: string,
   userContext?: AuthenticatedUserContext,
@@ -3612,7 +4279,9 @@ function resolveQueryStart(
     return `${getPreviousMonthValue(monthRange.month)}-01`;
   }
   if (includeCreditCardInvoices) {
-    return `${getMonthOffsetValue(monthRange.month, -2)}-01`;
+    // The selected invoice may use an earlier closing day, and its immediately
+    // preceding invoice can therefore start in the third prior calendar month.
+    return `${getMonthOffsetValue(monthRange.month, -3)}-01`;
   }
   return monthRange.start;
 }
@@ -3971,13 +4640,12 @@ function sumTransactionsByType(
   type: TransactionType,
 ) {
   return transactions.reduce((sum, transaction) => {
+    if (type === "income") return sum + getIncomeAmount(transaction);
+    if (type === "expense") {
+      return sum + getPersonalSpendingAmount(transaction, transactions);
+    }
     if (transaction.type !== type) return sum;
-    return (
-      sum +
-      (type === "expense"
-        ? getSpendingAmount(transaction)
-        : Math.abs(transaction.amount))
-    );
+    return sum + Math.abs(transaction.amount);
   }, 0);
 }
 
@@ -4153,7 +4821,9 @@ function buildDashboardSummaryData({
     "expense",
   );
   const predictedExpenses = scheduledExpenseTransactions.reduce(
-    (sum, transaction) => sum + getSpendingAmount(transaction),
+    (sum, transaction) =>
+      sum +
+      getPersonalSpendingAmount(transaction, scheduledExpenseTransactions),
     0,
   );
 
@@ -4183,14 +4853,24 @@ function buildExpensesOverTimeData(
           getFinancialMonth(transaction) === monthBucket.key &&
           getSpendingAmount(transaction) > 0,
       )
-      .reduce((sum, transaction) => sum + getSpendingAmount(transaction), 0),
+      .reduce(
+        (sum, transaction) =>
+          sum +
+          getPersonalSpendingAmount(transaction, trendExpenseTransactions),
+        0,
+      ),
     plannedAmount: scheduledExpenseTransactions
       .filter(
         (transaction) =>
           getFinancialMonth(transaction) === monthBucket.key &&
           getSpendingAmount(transaction) > 0,
       )
-      .reduce((sum, transaction) => sum + getSpendingAmount(transaction), 0),
+      .reduce(
+        (sum, transaction) =>
+          sum +
+          getPersonalSpendingAmount(transaction, scheduledExpenseTransactions),
+        0,
+      ),
     monthKey: monthBucket.monthKey,
   }));
 }
@@ -4199,7 +4879,7 @@ function buildDailyExpensesOverTime(transactions: Transaction[]) {
   return transactions
     .filter((transaction) => getSpendingAmount(transaction) > 0)
     .map((transaction) => ({
-      amount: getSpendingAmount(transaction),
+      amount: getPersonalSpendingAmount(transaction, transactions),
       date: transaction.date,
     }))
     .sort((left, right) => left.date.localeCompare(right.date));
@@ -4220,12 +4900,8 @@ function buildDashboardBudgetContext({
     wants_limit?: number | null;
   } | null;
 }) {
-  const trendExpenseTransactions = trendTransactions.filter(
-    (transaction) => getSpendingAmount(transaction) > 0,
-  );
-  const scheduledExpenseTransactions = scheduledTransactions.filter(
-    (transaction) => getSpendingAmount(transaction) > 0,
-  );
+  const trendExpenseTransactions = trendTransactions;
+  const scheduledExpenseTransactions = scheduledTransactions;
   const budgetData = calculateBudgetData(
     sumTransactionsByType(transactions, "income"),
     sumBudgetUsageByGroup(transactions),
@@ -4414,6 +5090,7 @@ function buildReportTransactions(
   transactionMonthPairs: { financialMonth: string; transaction: Transaction }[],
   periodMonthSet: Set<string>,
 ) {
+  const transactions = transactionMonthPairs.map((pair) => pair.transaction);
   return transactionMonthPairs
     .filter((pair) => periodMonthSet.has(pair.financialMonth))
     .map(({ financialMonth, transaction }) => {
@@ -4421,8 +5098,15 @@ function buildReportTransactions(
       const repayment = entryKind === "repayment";
       const statement = getStatementMetadata(transaction);
       let amount = Math.abs(transaction.amount);
+      let grossAmount = amount;
+      let reimbursedAmount = 0;
       if (transaction.type === "expense" && !repayment) {
-        amount = getSpendingAmount(transaction);
+        grossAmount = getSpendingAmount(transaction);
+        amount = getPersonalSpendingAmount(transaction, transactions);
+        reimbursedAmount = Number((grossAmount - amount).toFixed(2));
+      } else if (entryKind === "reimbursement") {
+        grossAmount = 0;
+        reimbursedAmount = amount;
       }
       return {
         amount,
@@ -4431,8 +5115,11 @@ function buildReportTransactions(
         description: transaction.descriptionKey,
         entryKind,
         financialMonth,
+        grossAmount,
         paymentMethod: transaction.paymentMethodKey ?? null,
         purchaseMonth: repayment ? null : transaction.date.slice(0, 7),
+        reimbursedAmount,
+        relatedTransactionId: transaction.relatedTransactionId ?? null,
         statementDueDate: statement?.dueDate ?? null,
         statementPeriod: statement?.period ?? null,
         type: transaction.type,

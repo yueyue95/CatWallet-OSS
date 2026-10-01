@@ -14,10 +14,16 @@ import type {
   SinkingFund,
 } from "@/lib/finance/catwallet";
 import type { TransactionFormCategory } from "@/lib/finance/transactions";
+import type { InstallmentDeletePreview } from "@/lib/finance/transactions";
 
 type Props = {
   categories: TransactionFormCategory[];
+  deleteInstallmentAction: (data: { planId: string }) => Promise<void>;
   items: InstallmentOverviewItem[];
+  previewDeleteInstallmentAction: (data: {
+    planId: string;
+  }) => Promise<InstallmentDeletePreview>;
+  restoreInstallmentAction: (data: { planId: string }) => Promise<void>;
   saveAllocationAction: (
     data: SaveInstallmentRetirementInput,
   ) => Promise<InstallmentRetirementAllocation[]>;
@@ -254,6 +260,77 @@ function Editor({
   );
 }
 
+function useInstallmentLifecycle(props: Props, item: InstallmentOverviewItem) {
+  const { t } = useI18n();
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  async function remove() {
+    setPending(true);
+    setError(null);
+    try {
+      const preview = await props.previewDeleteInstallmentAction({
+        planId: item.groupId,
+      });
+      if (!preview.canDelete) return setError(preview.blockers.join(", "));
+      if (!window.confirm(t("installments.deleteConfirm"))) return;
+      await props.deleteInstallmentAction({ planId: item.groupId });
+      router.refresh();
+    } catch {
+      setError(t("installments.lifecycleError"));
+    } finally {
+      setPending(false);
+    }
+  }
+  async function restore() {
+    setPending(true);
+    setError(null);
+    try {
+      await props.restoreInstallmentAction({ planId: item.groupId });
+      router.refresh();
+    } catch {
+      setError(t("installments.lifecycleError"));
+    } finally {
+      setPending(false);
+    }
+  }
+  return { error, pending, remove, restore };
+}
+
+function InstallmentLifecycleControls(
+  props: Props & { item: InstallmentOverviewItem },
+) {
+  const { item } = props;
+  const { t } = useI18n();
+  const lifecycle = useInstallmentLifecycle(props, item);
+  let button = null;
+  if (item.archivedAt) {
+    button = (
+      <Button disabled={lifecycle.pending} onClick={lifecycle.restore}>
+        {t("installments.restore")}
+      </Button>
+    );
+  } else if (item.retired) {
+    button = (
+      <Button
+        disabled={lifecycle.pending}
+        onClick={lifecycle.remove}
+        variant="destructive"
+      >
+        {t("installments.delete")}
+      </Button>
+    );
+  }
+  return (
+    <>
+      {button}
+      {lifecycle.error ? (
+        <p className="text-sm text-destructive">{lifecycle.error}</p>
+      ) : null}
+    </>
+  );
+}
+
 function InstallmentCard(props: Props & { item: InstallmentOverviewItem }) {
   const { item, categories, sinkingFunds } = props;
   const { t, formatCurrency, formatDate } = useI18n();
@@ -374,15 +451,18 @@ function InstallmentCard(props: Props & { item: InstallmentOverviewItem }) {
             ) : null}
           </section>
         ) : null}
-        <Button
-          variant="outline"
-          aria-expanded={open}
-          disabled={open}
-          onClick={() => setOpen(true)}
-        >
-          {t(allocations.length ? "retirement.edit" : "retirement.setup")}
-        </Button>
-        {open ? (
+        {!item.archivedAt ? (
+          <Button
+            variant="outline"
+            aria-expanded={open}
+            disabled={open}
+            onClick={() => setOpen(true)}
+          >
+            {t(allocations.length ? "retirement.edit" : "retirement.setup")}
+          </Button>
+        ) : null}
+        <InstallmentLifecycleControls {...props} item={item} />
+        {open && !item.archivedAt ? (
           <Editor
             {...props}
             item={{ ...item, allocations }}

@@ -42,6 +42,7 @@ export interface TransactionFormData {
   currentInstallment: number;
   countsTowardFunMoney: boolean;
   description: string;
+  fixedCommitmentId?: string;
   notes?: string;
 }
 
@@ -60,6 +61,11 @@ type TransactionFormProps = {
   readonly onSuccess?: () => void;
   readonly paymentMethods: TransactionFormPaymentMethod[];
   readonly coolingItem?: Pick<CoolingItem, "amountCents" | "id" | "name">;
+  readonly fixedCommitments?: Array<{
+    amount: number;
+    id: string;
+    name: string;
+  }>;
   readonly successRedirect?: string;
 };
 
@@ -868,6 +874,7 @@ type TransactionDateAndInstallmentsProps = TransactionFormFieldProps & {
   readonly currentError?: string;
   readonly canInstallment: boolean;
   readonly installmentOptions: ReturnType<typeof getInstallmentOptions>;
+  readonly fixedCommitments?: TransactionFormProps["fixedCommitments"];
   readonly todayDateInputValue: string;
   readonly t: (key: string) => string;
 };
@@ -879,6 +886,7 @@ function TransactionDateAndInstallments({
   currentError,
   canInstallment,
   installmentOptions,
+  fixedCommitments,
   todayDateInputValue,
   t,
 }: TransactionDateAndInstallmentsProps) {
@@ -923,6 +931,26 @@ function TransactionDateAndInstallments({
                   value: "total",
                   label: t("transaction.installmentMode.total"),
                 },
+              ]}
+            />
+          ) : null}
+          {formData.installmentCount > 1 && fixedCommitments?.length ? (
+            <CompactSelect
+              label={t("transaction.fixedCommitment")}
+              id="fixed-commitment"
+              value={formData.fixedCommitmentId ?? "none"}
+              onChange={(value) =>
+                setFormData({
+                  ...formData,
+                  fixedCommitmentId: value === "none" ? undefined : value,
+                })
+              }
+              options={[
+                { value: "none", label: t("transaction.fixedCommitmentNone") },
+                ...fixedCommitments.map((commitment) => ({
+                  value: commitment.id,
+                  label: `${commitment.name} · RM${commitment.amount.toFixed(2)}`,
+                })),
               ]}
             />
           ) : null}

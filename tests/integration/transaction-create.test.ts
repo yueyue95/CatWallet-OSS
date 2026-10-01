@@ -20,6 +20,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { createTransactionAction } from "@/app/transactions/actions";
+import { getInstallmentOverview } from "@/lib/finance/catwallet";
 import { createClient } from "@/lib/supabase/server";
 import {
   createTransactionMutation,
@@ -85,6 +86,28 @@ async function countRequest(transactionId: string) {
     .eq("id", transactionId);
   if (response.error) throw new Error("Local transaction count failed");
   return response.count;
+}
+
+async function installmentReferences() {
+  const category = await client
+    .from("categories")
+    .select("id")
+    .eq("group_type", "needs")
+    .is("deleted_at", null)
+    .limit(1)
+    .single();
+  const paymentMethod = await client
+    .from("payment_methods")
+    .select("id")
+    .is("deleted_at", null)
+    .limit(1)
+    .single();
+  expect(category.error).toBeNull();
+  expect(paymentMethod.error).toBeNull();
+  return {
+    category: category.data!.id,
+    paymentMethod: paymentMethod.data!.id,
+  };
 }
 
 describe.skipIf(!runLocal)(
@@ -329,74 +352,322 @@ describe.skipIf(!runLocal)(
       expect(concurrentRow.data).toHaveLength(1);
     });
 
-    it("E: creates per-installment metadata and keeps every amount equal", async () => {
+    it("E: records only the current installment and plans the future", async () => {
+      const references = await installmentReferences();
       const request = {
         ...input(),
-        amount: 500,
+        ...references,
+        amount: 463,
         currentInstallment: 5,
         date: "2030-01-15",
         installmentAmountMode: "per_installment" as const,
         installmentCount: 6,
       };
       const result = await createTransactionAction(request);
-      const rows = await client
+      const transaction = await client
         .from("transactions")
         .select(
           "amount, installment_amount, installment_amount_mode, installment_current_number, installment_number, installment_total",
         )
-        .eq(
-          "installment_group_id",
-          (
-            await client
-              .from("transactions")
-              .select("installment_group_id")
-              .eq("id", result.transactionId)
-              .single()
-          ).data?.installment_group_id ?? "",
-        )
+        .eq("id", result.transactionId)
+        .single();
+      const plan = await client
+        .from("installment_plans")
+        .select("id, current_installment, total_installments")
+        .eq("idempotency_key", request.idempotencyKey)
+        .single();
+      const occurrences = await client
+        .from("installment_occurrences")
+        .select("amount, due_date, installment_number, status, transaction_id")
+        .eq("plan_id", plan.data?.id ?? "")
         .order("installment_number");
-      expect(rows.error).toBeNull();
-      expect(rows.data?.map((row) => Number(row.amount))).toEqual([
-        500, 500, 500, 500, 500, 500,
+
+      expect(transaction.error).toBeNull();
+      expect(transaction.data).toMatchObject({
+        amount: 463,
+        installment_amount: 463,
+        installment_amount_mode: "per_installment",
+        installment_current_number: 5,
+        installment_number: 5,
+        installment_total: 6,
+      });
+      expect(plan.data).toMatchObject({
+        current_installment: 5,
+        total_installments: 6,
+      });
+      expect(occurrences.data).toEqual([
+        {
+          amount: 463,
+          due_date: "2030-01-15",
+          installment_number: 5,
+          status: "posted",
+          transaction_id: result.transactionId,
+        },
+        {
+          amount: 463,
+          due_date: "2030-02-15",
+          installment_number: 6,
+          status: "planned",
+          transaction_id: null,
+        },
       ]);
-      expect(
-        rows.data?.every(
-          (row) => row.installment_amount_mode === "per_installment",
-        ),
-      ).toBe(true);
-      expect(
-        rows.data?.every((row) => Number(row.installment_amount) === 500),
-      ).toBe(true);
-      expect(
-        rows.data?.every((row) => row.installment_current_number === 5),
-      ).toBe(true);
+      const user = (await client.auth.getUser()).data.user!;
+      const overview = await getInstallmentOverview({
+        claims: { sub: user.id },
+        createdAt: user.created_at ?? null,
+        supabase: client,
+        user,
+        userId: user.id,
+      });
+      expect(overview).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            currentInstallment: 5,
+            groupId: plan.data!.id,
+            paidAmount: 2315,
+            remainingAmount: 463,
+            remainingInstallments: 1,
+            totalAmount: 2778,
+            totalInstallments: 6,
+          }),
+        ]),
+      );
+      const splitDelete = await client
+        .from("transactions")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", result.transactionId);
+      expect(splitDelete.error?.message).toContain(
+        "use installment group lifecycle operations",
+      );
+      await expect(createTransactionAction(request)).resolves.toEqual({
+        ok: true,
+        transactionId: result.transactionId,
+      });
+      expect(await countRequest(result.transactionId)).toBe(1);
     });
 
-    it("F: keeps legacy total mode rounding when explicitly selected", async () => {
+    it("atomically replaces an equivalent fixed commitment and preserves replay", async () => {
+      const references = await installmentReferences();
+      const equivalentCommitment = await client
+        .from("fixed_commitments")
+        .insert({
+          amount: 137,
+          cadence: "monthly",
+          category_id: references.category,
+          include_in_safe_to_spend: true,
+          is_enabled: true,
+          name: "Synthetic equivalent commitment",
+          payment_method_id: references.paymentMethod,
+          start_date: "2030-01-01",
+        })
+        .select("id")
+        .single();
+      expect(equivalentCommitment.error).toBeNull();
+
       const request = {
         ...input(),
-        amount: 500,
+        ...references,
+        amount: 137,
+        currentInstallment: 10,
+        date: "2030-01-15",
+        description: "Synthetic converted installment",
+        fixedCommitmentId: equivalentCommitment.data!.id,
+        installmentAmountMode: "per_installment" as const,
+        installmentCount: 12,
+      };
+      const first = await createTransactionAction(request);
+      await expect(createTransactionAction(request)).resolves.toEqual(first);
+
+      const [commitment, plan] = await Promise.all([
+        client
+          .from("fixed_commitments")
+          .select("is_enabled")
+          .eq("id", equivalentCommitment.data!.id)
+          .single(),
+        client
+          .from("installment_plans")
+          .select("linked_fixed_commitment_id")
+          .eq("idempotency_key", request.idempotencyKey)
+          .single(),
+      ]);
+      expect(commitment.data?.is_enabled).toBe(false);
+      expect(plan.data?.linked_fixed_commitment_id).toBe(
+        equivalentCommitment.data!.id,
+      );
+
+      const mismatchCommitment = await client
+        .from("fixed_commitments")
+        .insert({
+          amount: 463,
+          cadence: "monthly",
+          category_id: references.category,
+          include_in_safe_to_spend: true,
+          is_enabled: true,
+          name: "Synthetic mismatch commitment",
+          payment_method_id: references.paymentMethod,
+          start_date: "2030-01-01",
+        })
+        .select("id")
+        .single();
+      expect(mismatchCommitment.error).toBeNull();
+      await expect(
+        createTransactionAction({
+          ...request,
+          fixedCommitmentId: mismatchCommitment.data!.id,
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toThrow("amount_mismatch");
+      const mismatchAfter = await client
+        .from("fixed_commitments")
+        .select("is_enabled")
+        .eq("id", mismatchCommitment.data!.id)
+        .single();
+      expect(mismatchAfter.data?.is_enabled).toBe(true);
+    });
+
+    it("F: preserves total-mode rounding without fabricating future transactions", async () => {
+      const references = await installmentReferences();
+      const request = {
+        ...input(),
+        ...references,
+        amount: 463,
         date: "2030-01-15",
         installmentAmountMode: "total" as const,
         installmentCount: 6,
       };
       const result = await createTransactionAction(request);
-      const first = await client
-        .from("transactions")
-        .select("installment_group_id")
-        .eq("id", result.transactionId)
+      const plan = await client
+        .from("installment_plans")
+        .select("id")
+        .eq("idempotency_key", request.idempotencyKey)
         .single();
-      const rows = await client
-        .from("transactions")
-        .select("amount, installment_amount_mode, installment_amount")
-        .eq("installment_group_id", first.data?.installment_group_id ?? "")
+      const occurrences = await client
+        .from("installment_occurrences")
+        .select("amount, installment_number, transaction_id")
+        .eq("plan_id", plan.data?.id ?? "")
         .order("installment_number");
-      expect(rows.data?.map((row) => Number(row.amount))).toEqual([
-        83.33, 83.33, 83.33, 83.33, 83.33, 83.35,
+      expect(occurrences.data?.map((row) => Number(row.amount))).toEqual([
+        77.16, 77.16, 77.16, 77.16, 77.16, 77.2,
       ]);
       expect(
-        rows.data?.every((row) => row.installment_amount_mode === "total"),
-      ).toBe(true);
+        occurrences.data?.filter((row) => row.transaction_id !== null),
+      ).toEqual([
+        {
+          amount: 77.16,
+          installment_number: 1,
+          transaction_id: result.transactionId,
+        },
+      ]);
+    });
+
+    it("G: serializes concurrent installment retries without duplicate plans", async () => {
+      const references = await installmentReferences();
+      const request = {
+        ...input(),
+        ...references,
+        amount: 463,
+        currentInstallment: 3,
+        date: "2030-01-31",
+        installmentAmountMode: "per_installment" as const,
+        installmentCount: 6,
+      };
+      const results = await Promise.all([
+        createTransactionAction(request),
+        createTransactionAction(request),
+      ]);
+      expect(results).toEqual([
+        { ok: true, transactionId: request.idempotencyKey },
+        { ok: true, transactionId: request.idempotencyKey },
+      ]);
+      const plans = await client
+        .from("installment_plans")
+        .select("id", { count: "exact" })
+        .eq("idempotency_key", request.idempotencyKey);
+      const occurrences = await client
+        .from("installment_occurrences")
+        .select("id", { count: "exact" })
+        .eq("plan_id", plans.data?.[0]?.id ?? "");
+      expect(plans.count).toBe(1);
+      expect(occurrences.count).toBe(4);
+      expect(await countRequest(request.idempotencyKey)).toBe(1);
+    });
+
+    it("H: rejects cross-user installment references without a partial plan", async () => {
+      const otherCategory = await otherClient
+        .from("categories")
+        .select("id")
+        .eq("group_type", "needs")
+        .is("deleted_at", null)
+        .limit(1)
+        .single();
+      const otherPaymentMethod = await otherClient
+        .from("payment_methods")
+        .select("id")
+        .is("deleted_at", null)
+        .limit(1)
+        .single();
+      const request = {
+        ...input(),
+        amount: 137,
+        category: otherCategory.data!.id,
+        currentInstallment: 10,
+        installmentAmountMode: "per_installment" as const,
+        installmentCount: 12,
+        paymentMethod: otherPaymentMethod.data!.id,
+      };
+
+      await expect(createTransactionAction(request)).rejects.toThrow();
+      const plan = await client
+        .from("installment_plans")
+        .select("id", { count: "exact", head: true })
+        .eq("idempotency_key", request.idempotencyKey);
+      expect(plan.count).toBe(0);
+      expect(await countRequest(request.idempotencyKey)).toBe(0);
+    });
+
+    it("I: links an evidenced current transaction instead of duplicating it", async () => {
+      const references = await installmentReferences();
+      const existingTransactionId = randomUUID();
+      const inserted = await client.from("transactions").insert({
+        amount: 137,
+        category_id: references.category,
+        date: "2030-03-15",
+        description: "Existing statement transaction",
+        id: existingTransactionId,
+        kind: "expense",
+        payment_method_id: references.paymentMethod,
+      });
+      expect(inserted.error).toBeNull();
+      const request = {
+        ...input(),
+        ...references,
+        amount: 137,
+        currentInstallment: 10,
+        date: "2030-03-15",
+        existingTransactionId,
+        installmentAmountMode: "per_installment" as const,
+        installmentCount: 12,
+      };
+
+      await expect(createTransactionAction(request)).resolves.toEqual({
+        ok: true,
+        transactionId: existingTransactionId,
+      });
+      const transaction = await client
+        .from("transactions")
+        .select("installment_group_id, installment_number")
+        .eq("id", existingTransactionId)
+        .single();
+      const user = (await client.auth.getUser()).data.user!;
+      const allUserTransactions = await client
+        .from("transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("date", request.date)
+        .eq("amount", request.amount);
+      expect(transaction.data).toMatchObject({ installment_number: 10 });
+      expect(transaction.data?.installment_group_id).not.toBeNull();
+      expect(allUserTransactions.count).toBe(1);
     });
   },
 );

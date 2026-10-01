@@ -17,18 +17,29 @@ vi.mock("@/lib/crypto/field-encryption", () => ({
 import { createClient } from "@/lib/supabase/server";
 import {
   advanceInstallments,
+  createAccountTransferWithResult,
   createInvoiceAdvancePayment,
+  createReimbursementWithResult,
   createTransaction,
+  deleteInstallment,
+  deleteAccountTransfer,
   deleteInstallments,
   deleteTransaction,
+  previewDeleteInstallment,
+  previewAccountTransfer,
+  previewInstallmentCommitmentConversion,
+  restoreInstallment,
+  restoreAccountTransfer,
   restoreTransaction,
   previewInstallmentPrepayment,
   updateTransaction,
+  updateAccountTransfer,
 } from "@/lib/finance/transactions";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const CATEGORY_ID = "22222222-2222-4222-8222-222222222222";
 const PAYMENT_METHOD_ID = "33333333-3333-4333-8333-333333333333";
+const DESTINATION_PAYMENT_METHOD_ID = "44444444-4444-4444-8444-444444444444";
 const TRANSACTION_ID = "88888888-8888-4888-8888-888888888888";
 const INSTALLMENT_ANCHOR_ID = "99999999-9999-4999-9999-999999999999";
 const LAST_INSTALLMENT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -109,6 +120,24 @@ function setup(
 ) {
   const supabase = makeSupabase(fromResponses, opts);
   vi.mocked(createClient).mockResolvedValue(supabase as never);
+  return supabase;
+}
+
+function setupInstallmentRpc() {
+  const supabase = setup([
+    qb({ data: { id: CATEGORY_ID }, error: null }),
+    qb({ data: { id: PAYMENT_METHOD_ID }, error: null }),
+  ]);
+  supabase.rpc.mockResolvedValue({
+    data: [
+      {
+        created_plan_id: INSTALLMENT_ANCHOR_ID,
+        created_transaction_id: TRANSACTION_ID,
+        replayed: false,
+      },
+    ],
+    error: null,
+  });
   return supabase;
 }
 
@@ -321,66 +350,80 @@ describe("createTransaction", () => {
     expect(Array.isArray(captured) && captured.length).toBe(1);
   });
 
-  it("creates multiple installment rows for an expense purchase", async () => {
-    let captured: unknown;
-    setup([qb({ error: null }, { onInsert: (rows) => (captured = rows) })]);
+  it("creates an installment plan through one atomic RPC", async () => {
+    const supabase = setupInstallmentRpc();
     await expect(
       createTransaction({
         ...validInput,
         type: "expense",
         amount: 300,
+        category: CATEGORY_ID,
+        currentInstallment: 2,
+        idempotencyKey: TRANSACTION_ID,
         installmentCount: 3,
+        paymentMethod: PAYMENT_METHOD_ID,
       }),
-    ).resolves.toEqual(expect.any(String));
-    expect(Array.isArray(captured) && captured.length).toBe(3);
+    ).resolves.toBe(TRANSACTION_ID);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "create_installment_plan",
+      expect.objectContaining({
+        p_current_installment: 2,
+        p_idempotency_key: TRANSACTION_ID,
+        p_occurrences: [
+          expect.objectContaining({ installmentNumber: 2, status: "posted" }),
+          expect.objectContaining({ installmentNumber: 3, status: "planned" }),
+        ],
+      }),
+    );
   });
 
-  it("stores a transaction idempotency key only on the first installment row", async () => {
-    let captured: unknown;
-    setup([qb({ error: null }, { onInsert: (rows) => (captured = rows) })]);
+  it("passes one idempotency key to the installment RPC", async () => {
+    const supabase = setupInstallmentRpc();
     await createTransaction({
       ...validInput,
       amount: 0.01,
+      category: CATEGORY_ID,
       currentInstallment: 1,
       date: "2030-01-15",
       idempotencyKey: TRANSACTION_ID,
       installmentAmountMode: "per_installment",
       installmentCount: 2,
+      paymentMethod: PAYMENT_METHOD_ID,
     });
 
-    expect(captured).toMatchObject([
-      { amount: 0.01, entry_idempotency_key: TRANSACTION_ID },
-      { amount: 0.01 },
-    ]);
-    expect(
-      (captured as Array<{ entry_idempotency_key?: string }>).map(
-        (row) => row.entry_idempotency_key,
-      ),
-    ).toEqual([TRANSACTION_ID, undefined]);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "create_installment_plan",
+      expect.objectContaining({
+        p_idempotency_key: TRANSACTION_ID,
+        p_transaction_id: TRANSACTION_ID,
+      }),
+    );
   });
 
-  it("creates the total amount mode without duplicate entry keys", async () => {
-    let captured: unknown;
-    setup([qb({ error: null }, { onInsert: (rows) => (captured = rows) })]);
+  it("creates the total amount mode with cent-safe planned occurrences", async () => {
+    const supabase = setupInstallmentRpc();
     await createTransaction({
       ...validInput,
       amount: 1,
+      category: CATEGORY_ID,
       currentInstallment: 1,
       date: "2030-01-15",
       idempotencyKey: TRANSACTION_ID,
       installmentAmountMode: "total",
       installmentCount: 2,
+      paymentMethod: PAYMENT_METHOD_ID,
     });
 
-    expect(captured).toMatchObject([
-      { amount: 0.5, entry_idempotency_key: TRANSACTION_ID },
-      { amount: 0.5 },
-    ]);
-    expect(
-      (captured as Array<{ entry_idempotency_key?: string }>).map(
-        (row) => row.entry_idempotency_key,
-      ),
-    ).toEqual([TRANSACTION_ID, undefined]);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "create_installment_plan",
+      expect.objectContaining({
+        p_amount_mode: "total",
+        p_occurrences: [
+          expect.objectContaining({ amount: 0.5, status: "posted" }),
+          expect.objectContaining({ amount: 0.5, status: "planned" }),
+        ],
+      }),
+    );
   });
 
   it("rejects a total installment amount that cannot fund every row before writing", async () => {
@@ -427,21 +470,27 @@ describe("createTransaction", () => {
     expect((captured as Array<{ date: string }>)[0].date).toBe("2030-01-15");
   });
 
-  it("keeps all historical installment occurrences before the user creation month", async () => {
-    let captured: unknown;
-    setup([qb({ error: null }, { onInsert: (rows) => (captured = rows) })], {
-      createdAt: "2030-02-01T00:00:00.000Z",
-    });
+  it("does not backfill installment occurrences before the current one", async () => {
+    const supabase = setupInstallmentRpc();
     await expect(
       createTransaction({
         ...validInput,
         type: "expense",
         amount: 300,
+        category: CATEGORY_ID,
+        currentInstallment: 2,
+        idempotencyKey: TRANSACTION_ID,
         installmentCount: 3,
         date: "2030-01-15",
+        paymentMethod: PAYMENT_METHOD_ID,
       }),
-    ).resolves.toEqual(expect.any(String));
-    expect(Array.isArray(captured) && captured.length).toBe(3);
+    ).resolves.toBe(TRANSACTION_ID);
+    const args = supabase.rpc.mock.calls[0][1] as {
+      p_occurrences: Array<{ installmentNumber: number }>;
+    };
+    expect(args.p_occurrences.map((row) => row.installmentNumber)).toEqual([
+      2, 3,
+    ]);
   });
 
   it("creates a historical income before the user creation month", async () => {
@@ -458,6 +507,208 @@ describe("createTransaction", () => {
     ).resolves.toEqual(expect.any(String));
     expect((captured as Array<{ date: string; kind: string }>)[0]).toEqual(
       expect.objectContaining({ date: "2030-01-15", kind: "income" }),
+    );
+  });
+});
+
+describe("createReimbursementWithResult", () => {
+  it("delegates an encrypted reimbursement to the atomic owner-scoped RPC", async () => {
+    const supabase = setup([
+      qb({ data: { id: PAYMENT_METHOD_ID }, error: null }),
+    ]);
+    supabase.rpc.mockResolvedValue({
+      data: [{ created_transaction_id: TRANSACTION_ID, replayed: false }],
+      error: null,
+    });
+
+    await expect(
+      createReimbursementWithResult({
+        amount: 11.2,
+        date: "2030-01-15",
+        description: "Synthetic reimbursement",
+        idempotencyKey: TRANSACTION_ID,
+        originalTransactionId: INSTALLMENT_ANCHOR_ID,
+        paymentMethod: PAYMENT_METHOD_ID,
+      }),
+    ).resolves.toEqual({ replayed: false, transactionId: TRANSACTION_ID });
+    expect(supabase.rpc).toHaveBeenCalledWith("create_reimbursement", {
+      p_amount: 11.2,
+      p_date: "2030-01-15",
+      p_description: "Synthetic reimbursement",
+      p_idempotency_key: TRANSACTION_ID,
+      p_notes: null,
+      p_original_transaction_id: INSTALLMENT_ANCHOR_ID,
+      p_payment_method_id: PAYMENT_METHOD_ID,
+      p_transaction_id: TRANSACTION_ID,
+    });
+  });
+});
+
+describe("account transfer lifecycle", () => {
+  const input = {
+    amount: 150,
+    date: "2030-01-15",
+    description: "Synthetic account transfer",
+    destinationAccountId: DESTINATION_PAYMENT_METHOD_ID,
+    idempotencyKey: TRANSACTION_ID,
+    sourceAccountId: PAYMENT_METHOD_ID,
+  };
+
+  it("delegates creation to the atomic owner-scoped RPC", async () => {
+    const supabase = setup();
+    supabase.rpc.mockResolvedValue({
+      data: [
+        {
+          created_transfer_id: TRANSACTION_ID,
+          current_revision: 1,
+          replayed: false,
+        },
+      ],
+      error: null,
+    });
+
+    await expect(createAccountTransferWithResult(input)).resolves.toEqual({
+      replayed: false,
+      revision: 1,
+      transferId: TRANSACTION_ID,
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith("create_account_transfer", {
+      p_amount: 150,
+      p_description: "Synthetic account transfer",
+      p_destination_account_id: DESTINATION_PAYMENT_METHOD_ID,
+      p_idempotency_key: TRANSACTION_ID,
+      p_notes: null,
+      p_source_account_id: PAYMENT_METHOD_ID,
+      p_transfer_date: "2030-01-15",
+      p_transfer_id: TRANSACTION_ID,
+    });
+  });
+
+  it("previews, updates, deletes, and restores with a revision guard", async () => {
+    const supabase = setup();
+    supabase.rpc
+      .mockResolvedValueOnce({
+        data: {
+          blockers: [],
+          canApply: true,
+          currentRevision: 1,
+          transferDate: "2030-01-15",
+          transferId: TRANSACTION_ID,
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: 2, error: null })
+      .mockResolvedValueOnce({ data: 3, error: null })
+      .mockResolvedValueOnce({ data: 4, error: null });
+
+    await expect(
+      previewAccountTransfer({
+        ...input,
+        expectedRevision: 1,
+        id: TRANSACTION_ID,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ canApply: true, currentRevision: 1 }),
+    );
+    await expect(
+      updateAccountTransfer({
+        ...input,
+        expectedRevision: 1,
+        id: TRANSACTION_ID,
+      }),
+    ).resolves.toBe(2);
+    await expect(deleteAccountTransfer(TRANSACTION_ID, 2)).resolves.toBe(3);
+    await expect(restoreAccountTransfer(TRANSACTION_ID, 3)).resolves.toBe(4);
+    expect(supabase.rpc).toHaveBeenNthCalledWith(3, "delete_account_transfer", {
+      p_expected_revision: 2,
+      p_transfer_id: TRANSACTION_ID,
+    });
+    expect(supabase.rpc).toHaveBeenNthCalledWith(
+      4,
+      "restore_account_transfer",
+      { p_expected_revision: 3, p_transfer_id: TRANSACTION_ID },
+    );
+  });
+});
+
+describe("installment group lifecycle", () => {
+  it("previews blockers through the owner-scoped RPC", async () => {
+    const supabase = setup();
+    supabase.rpc.mockResolvedValue({
+      data: {
+        blockers: ["active_plan"],
+        canDelete: false,
+        occurrenceCount: 2,
+        planId: INSTALLMENT_ANCHOR_ID,
+      },
+      error: null,
+    });
+
+    await expect(
+      previewDeleteInstallment(INSTALLMENT_ANCHOR_ID),
+    ).resolves.toEqual({
+      blockers: ["active_plan"],
+      canDelete: false,
+      occurrenceCount: 2,
+      planId: INSTALLMENT_ANCHOR_ID,
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith("preview_delete_installment", {
+      p_plan_id: INSTALLMENT_ANCHOR_ID,
+    });
+  });
+
+  it("uses dedicated group delete and restore RPCs", async () => {
+    const supabase = setup();
+    supabase.rpc.mockResolvedValue({
+      data: INSTALLMENT_ANCHOR_ID,
+      error: null,
+    });
+
+    await deleteInstallment(INSTALLMENT_ANCHOR_ID);
+    await restoreInstallment(INSTALLMENT_ANCHOR_ID);
+    expect(supabase.rpc).toHaveBeenNthCalledWith(1, "delete_installment", {
+      p_plan_id: INSTALLMENT_ANCHOR_ID,
+    });
+    expect(supabase.rpc).toHaveBeenNthCalledWith(2, "restore_installment", {
+      p_plan_id: INSTALLMENT_ANCHOR_ID,
+    });
+  });
+});
+
+describe("installment commitment conversion", () => {
+  it("previews the exact monthly commitment mapping through the invoker RPC", async () => {
+    const supabase = setup();
+    supabase.rpc.mockResolvedValue({
+      data: {
+        blockers: [],
+        canConvert: true,
+        fixedCommitmentId: INSTALLMENT_ANCHOR_ID,
+      },
+      error: null,
+    });
+
+    await expect(
+      previewInstallmentCommitmentConversion({
+        categoryId: CATEGORY_ID,
+        currentOccurrenceDate: "2030-01-15",
+        fixedCommitmentId: INSTALLMENT_ANCHOR_ID,
+        installmentAmount: 137,
+        paymentMethodId: PAYMENT_METHOD_ID,
+      }),
+    ).resolves.toEqual({
+      blockers: [],
+      canConvert: true,
+      fixedCommitmentId: INSTALLMENT_ANCHOR_ID,
+    });
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "preview_installment_commitment_conversion",
+      {
+        p_category_id: CATEGORY_ID,
+        p_current_occurrence_date: "2030-01-15",
+        p_fixed_commitment_id: INSTALLMENT_ANCHOR_ID,
+        p_installment_amount: 137,
+        p_payment_method_id: PAYMENT_METHOD_ID,
+      },
     );
   });
 });

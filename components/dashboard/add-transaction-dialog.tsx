@@ -22,6 +22,7 @@ interface AddTransactionDialogProps {
   onOpenChange: (open: boolean) => void;
   categories: TransactionFormCategory[];
   paymentMethods: TransactionFormPaymentMethod[];
+  fixedCommitments?: Array<{ amount: number; id: string; name: string }>;
   createCategoryAction?: (data: CreateCategoryInput) => Promise<void>;
   createPaymentMethodAction?: (data: CreatePaymentMethodInput) => Promise<void>;
   onSubmit: (
@@ -34,6 +35,7 @@ export function AddTransactionDialog({
   onOpenChange,
   categories,
   paymentMethods,
+  fixedCommitments,
   createCategoryAction,
   createPaymentMethodAction,
   onSubmit,
@@ -53,6 +55,7 @@ export function AddTransactionDialog({
           <TransactionForm
             categories={categories}
             paymentMethods={paymentMethods}
+            fixedCommitments={fixedCommitments}
             createCategoryAction={createCategoryAction}
             createPaymentMethodAction={createPaymentMethodAction}
             onSubmit={onSubmit}

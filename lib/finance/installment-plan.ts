@@ -17,6 +17,17 @@ export type InstallmentPlan = {
   totalAmount: number;
 };
 
+export type ActiveInstallmentOccurrence = {
+  amount: number;
+  dueDate: string;
+  installmentNumber: number;
+  status: "planned" | "posted";
+};
+
+export type ActiveInstallmentScheduleInput = InstallmentPlanInput & {
+  currentOccurrenceDate: string;
+};
+
 function toCents(value: number, label: string) {
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`${label} must be greater than zero.`);
@@ -93,4 +104,47 @@ export function buildInstallmentPlan({
     remainingInstallments: installmentCount - currentInstallment,
     totalAmount: fromCents(totalCents),
   };
+}
+
+function addMonthsClamped(isoDate: string, offset: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!match) throw new Error("Current occurrence date is invalid.");
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const source = new Date(Date.UTC(year, month - 1, day));
+  if (
+    source.getUTCFullYear() !== year ||
+    source.getUTCMonth() !== month - 1 ||
+    source.getUTCDate() !== day
+  ) {
+    throw new Error("Current occurrence date is invalid.");
+  }
+
+  const targetMonth = month - 1 + offset;
+  const targetYear = year + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+  const lastDay = new Date(
+    Date.UTC(targetYear, normalizedMonth + 1, 0),
+  ).getUTCDate();
+  return new Date(Date.UTC(targetYear, normalizedMonth, Math.min(day, lastDay)))
+    .toISOString()
+    .slice(0, 10);
+}
+
+export function buildActiveInstallmentSchedule({
+  currentOccurrenceDate,
+  ...input
+}: ActiveInstallmentScheduleInput): ActiveInstallmentOccurrence[] {
+  const plan = buildInstallmentPlan(input);
+
+  return plan.installmentAmounts
+    .slice(plan.currentInstallment - 1)
+    .map((amount, index) => ({
+      amount,
+      dueDate: addMonthsClamped(currentOccurrenceDate, index),
+      installmentNumber: plan.currentInstallment + index,
+      status: index === 0 ? "posted" : "planned",
+    }));
 }

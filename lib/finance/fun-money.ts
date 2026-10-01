@@ -13,7 +13,10 @@ export type FunMoneyTransaction = {
   countsTowardFunMoney: boolean;
   date: string;
   deletedAt?: string | null;
+  entryKind?: string | null;
+  id?: string;
   kind: "expense" | "income" | "saving";
+  relatedTransactionId?: string | null;
 };
 
 function toCents(value: number) {
@@ -36,7 +39,22 @@ export function sumFunMoneyTransactions(
       return sum;
     }
 
-    return sum + toCents(Number(transaction.amount));
+    const reimbursedCents = transaction.id
+      ? transactions.reduce((reimbursed, candidate) => {
+          if (
+            candidate.entryKind !== "reimbursement" ||
+            candidate.relatedTransactionId !== transaction.id ||
+            candidate.deletedAt ||
+            !candidate.date.startsWith(monthPrefix)
+          ) {
+            return reimbursed;
+          }
+          return reimbursed + toCents(Number(candidate.amount));
+        }, 0)
+      : 0;
+    return (
+      sum + Math.max(toCents(Number(transaction.amount)) - reimbursedCents, 0)
+    );
   }, 0);
 
   return spentCents / 100;

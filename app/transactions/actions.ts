@@ -5,31 +5,42 @@ import { z } from "zod";
 
 import {
   advanceInstallments,
+  createAccountTransferWithResult,
   createCategory,
   createInvoiceAdvancePayment,
   createPaymentMethod,
+  createReimbursementWithResult,
   createSubscription,
   createTransaction,
   deleteCategory,
+  deleteAccountTransfer,
+  deleteInstallment,
   deleteInstallments,
   deletePaymentMethod,
   deleteSubscription,
   deleteSubscriptionOccurrences,
   deleteTransaction,
   previewInstallmentPrepayment,
+  previewDeleteInstallment,
+  restoreInstallment,
+  restoreAccountTransfer,
   setSubscriptionPaused,
   type CreateCategoryInput,
+  type CreateAccountTransferInput,
   type CreateInvoiceAdvancePaymentInput,
   type CreatePaymentMethodInput,
+  type CreateReimbursementInput,
   type CreateSubscriptionInput,
   type AdvanceInstallmentsInput,
   type DeleteInstallmentsInput,
   type DeleteSubscriptionOccurrencesInput,
   type NewTransactionInput,
   type UpdateCategoryInput,
+  type UpdateAccountTransferInput,
   type UpdatePaymentMethodInput,
   type UpdateSubscriptionInput,
   updateCategory,
+  updateAccountTransfer,
   updatePaymentMethod,
   updateSubscription,
   updateTransaction,
@@ -90,6 +101,8 @@ const createTransactionActionSchema = z
     coolingItemId: uuidSchema.optional(),
     date: dateSchema,
     description: safeShortTextSchema,
+    existingTransactionId: uuidSchema.optional(),
+    fixedCommitmentId: uuidSchema.optional(),
     installmentCount: z.number().int().min(1).max(120),
     installmentAmountMode: z.enum(["per_installment", "total"]).optional(),
     currentInstallment: z.number().int().min(1).max(120).optional(),
@@ -179,6 +192,53 @@ const accountBalanceAdjustmentActionSchema = accountBalanceActionSchema
   })
   .strict();
 
+const accountTransferActionSchema = z
+  .object({
+    amount: z.number().finite().positive().max(1_000_000_000),
+    date: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
+    description: safeShortTextSchema,
+    destinationAccountId: uuidSchema,
+    notes: safeOptionalNotesSchema,
+    sourceAccountId: uuidSchema,
+  })
+  .strict()
+  .refine((value) => value.sourceAccountId !== value.destinationAccountId, {
+    message: "Source and destination accounts must differ",
+    path: ["destinationAccountId"],
+  });
+
+const createAccountTransferActionSchema = accountTransferActionSchema.and(
+  z.object({ idempotencyKey: uuidSchema.optional() }).strict(),
+);
+
+const updateAccountTransferActionSchema = accountTransferActionSchema.and(
+  z
+    .object({ expectedRevision: z.number().int().positive(), id: uuidSchema })
+    .strict(),
+);
+
+const accountTransferLifecycleActionSchema = z
+  .object({ expectedRevision: z.number().int().positive(), id: uuidSchema })
+  .strict();
+
+const reimbursementActionSchema = z
+  .object({
+    amount: z.number().finite().positive().max(1_000_000_000),
+    date: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
+    description: safeShortTextSchema,
+    idempotencyKey: uuidSchema.optional(),
+    notes: safeOptionalNotesSchema,
+    originalTransactionId: uuidSchema,
+    paymentMethod: uuidSchema,
+  })
+  .strict();
+
 const updateTransactionActionSchema = z
   .object({
     amount: z.number().finite().positive().max(1_000_000_000),
@@ -199,6 +259,8 @@ const deleteInstallmentsActionSchema = z
     transactionId: uuidSchema,
   })
   .strict();
+
+const installmentPlanActionSchema = z.object({ planId: uuidSchema }).strict();
 
 const advanceInstallmentsActionSchema = z
   .object({
@@ -348,6 +410,68 @@ export async function createTransactionAction(
     );
     throw error;
   }
+}
+
+function revalidateAccountTransferPaths() {
+  for (const path of ["/dashboard", "/reports", "/transactions"]) {
+    revalidatePath(path);
+  }
+}
+
+export async function createAccountTransferAction(
+  data: CreateAccountTransferInput,
+) {
+  const result = await createAccountTransferWithResult(
+    createAccountTransferActionSchema.parse(data),
+  );
+  revalidateAccountTransferPaths();
+  return result;
+}
+
+export async function updateAccountTransferAction(
+  data: UpdateAccountTransferInput,
+) {
+  const revision = await updateAccountTransfer(
+    updateAccountTransferActionSchema.parse(data),
+  );
+  revalidateAccountTransferPaths();
+  return revision;
+}
+
+export async function deleteAccountTransferAction(data: {
+  expectedRevision: number;
+  id: string;
+}) {
+  const parsed = accountTransferLifecycleActionSchema.parse(data);
+  const revision = await deleteAccountTransfer(
+    parsed.id,
+    parsed.expectedRevision,
+  );
+  revalidateAccountTransferPaths();
+  return revision;
+}
+
+export async function restoreAccountTransferAction(data: {
+  expectedRevision: number;
+  id: string;
+}) {
+  const parsed = accountTransferLifecycleActionSchema.parse(data);
+  const revision = await restoreAccountTransfer(
+    parsed.id,
+    parsed.expectedRevision,
+  );
+  revalidateAccountTransferPaths();
+  return revision;
+}
+
+export async function createReimbursementAction(
+  data: CreateReimbursementInput,
+) {
+  const result = await createReimbursementWithResult(
+    reimbursementActionSchema.parse(data),
+  );
+  revalidateAccountTransferPaths();
+  return result;
 }
 
 export async function createInvoiceAdvancePaymentAction(
@@ -520,6 +644,31 @@ export async function deleteInstallmentsAction(data: DeleteInstallmentsInput) {
   revalidatePath("/dashboard");
   revalidatePath("/payments");
   revalidatePath("/transactions");
+}
+
+function revalidateInstallmentLifecycle() {
+  revalidatePath("/dashboard");
+  revalidatePath("/installments");
+  revalidatePath("/payments");
+  revalidatePath("/reports");
+  revalidatePath("/transactions");
+}
+
+export async function previewDeleteInstallmentAction(data: { planId: string }) {
+  const { planId } = installmentPlanActionSchema.parse(data);
+  return previewDeleteInstallment(planId);
+}
+
+export async function deleteInstallmentAction(data: { planId: string }) {
+  const { planId } = installmentPlanActionSchema.parse(data);
+  await deleteInstallment(planId);
+  revalidateInstallmentLifecycle();
+}
+
+export async function restoreInstallmentAction(data: { planId: string }) {
+  const { planId } = installmentPlanActionSchema.parse(data);
+  await restoreInstallment(planId);
+  revalidateInstallmentLifecycle();
 }
 
 export async function advanceInstallmentsAction(

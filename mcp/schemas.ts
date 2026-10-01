@@ -395,6 +395,7 @@ export const createInstallmentTransportSchema = z
     currentInstallment: z.number().int().min(1),
     date,
     description: z.string().trim().min(1).max(160),
+    fixedCommitmentId: z.string().uuid().nullable().optional(),
     idempotencyKey,
     notes: z.string().trim().max(500).nullable().optional(),
     paymentAccountId: z.string().uuid(),
@@ -458,6 +459,82 @@ export const installmentPaymentSchema = z
 
 export const completeInstallmentSchema = z
   .object({ idempotencyKey, transactionId: z.string().uuid() })
+  .strict();
+
+export const previewDeleteInstallmentSchema = z
+  .object({ planId: z.string().uuid() })
+  .strict();
+
+export const deleteInstallmentSchema = z
+  .object({ idempotencyKey, planId: z.string().uuid() })
+  .strict();
+
+export const restoreInstallmentSchema = deleteInstallmentSchema;
+
+const accountTransferFields = {
+  amount: z.number().finite().positive(),
+  date,
+  description: z.string().trim().min(1).max(160),
+  destinationAccountId: z.string().uuid(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  sourceAccountId: z.string().uuid(),
+} as const;
+
+function requireDifferentTransferAccounts(
+  value: { destinationAccountId: string; sourceAccountId: string },
+  context: z.RefinementCtx,
+) {
+  if (value.sourceAccountId === value.destinationAccountId) {
+    context.addIssue({
+      code: "custom",
+      message: "destinationAccountId must differ from sourceAccountId",
+      path: ["destinationAccountId"],
+    });
+  }
+}
+
+export const previewAccountTransferSchema = z
+  .object({
+    ...accountTransferFields,
+    expectedRevision: z.number().int().positive().optional(),
+    id: z.string().uuid().optional(),
+  })
+  .strict()
+  .superRefine(requireDifferentTransferAccounts);
+
+export const createAccountTransferSchema = z
+  .object({ ...accountTransferFields, idempotencyKey })
+  .strict()
+  .superRefine(requireDifferentTransferAccounts);
+
+export const updateAccountTransferSchema = z
+  .object({
+    ...accountTransferFields,
+    expectedRevision: z.number().int().positive(),
+    id: z.string().uuid(),
+    idempotencyKey,
+  })
+  .strict()
+  .superRefine(requireDifferentTransferAccounts);
+
+export const accountTransferLifecycleSchema = z
+  .object({
+    expectedRevision: z.number().int().positive(),
+    id: z.string().uuid(),
+    idempotencyKey,
+  })
+  .strict();
+
+export const createReimbursementSchema = z
+  .object({
+    amount: z.number().finite().positive(),
+    date,
+    description: z.string().trim().min(1).max(160),
+    idempotencyKey,
+    notes: z.string().trim().max(500).nullable().optional(),
+    originalTransactionId: z.string().uuid(),
+    paymentAccountId: z.string().uuid(),
+  })
   .strict();
 
 const importRowSchema = z

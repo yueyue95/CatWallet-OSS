@@ -15,8 +15,11 @@ import {
 } from "@/lib/crypto/field-encryption";
 import { createTransaction } from "@/lib/finance/transactions";
 import {
+  deleteTransaction,
+  getPaymentsDueData,
   getMonthlySummary,
   listTransactions,
+  restoreTransaction,
   type AuthenticatedUserContext,
 } from "@/lib/finance/transactions";
 import {
@@ -31,6 +34,8 @@ import {
   undoTransactionImport,
 } from "@/mcp/butler-mutations";
 import type { Database } from "@/lib/supabase/database.types";
+import { getCatWalletDashboardData } from "@/lib/finance/catwallet";
+import { defaultReadModels } from "@/mcp/services";
 
 const runLocal = process.env.CATWALLET_RUN_LOCAL_LIFE_LEDGER_TESTS === "1";
 const localUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -337,6 +342,158 @@ describe.skipIf(!runLocal)("local life-ledger v1", () => {
       .eq("id", firstRepayment.data?.id ?? "");
     expect(crossUserRows.error).toBeNull();
     expect(crossUserRows.data).toEqual([]);
+  });
+
+  it("keeps a fully repaid invoice cleared across dashboard, payments, MCP, and reminders", async () => {
+    const categoryId = await defaultCategory(clientB);
+    const bankId = await paymentAccount(clientB, "bank");
+    const creditId = await paymentAccount(clientB, "credit");
+    const otherUserBefore = await listAccountBalances(contextA);
+    await clientB
+      .from("payment_methods")
+      .update({ balance_tracking_enabled: true })
+      .eq("id", bankId);
+    await clientB
+      .from("payment_methods")
+      .update({ closing_day: 24, due_day: 10 })
+      .eq("id", creditId);
+    await setAccountOpeningBalance({
+      amount: 1000,
+      effectiveDate: "2026-08-01",
+      paymentMethodId: bankId,
+      userContext: contextB,
+    });
+
+    await createTransaction(
+      {
+        amount: 100,
+        category: categoryId,
+        date: "2026-08-10",
+        description: "Synthetic prior-cycle purchase",
+        idempotencyKey: randomUUID(),
+        installmentCount: 1,
+        paymentMethod: creditId,
+        type: "expense",
+      },
+      contextB,
+    );
+    await createTransaction(
+      {
+        amount: 75,
+        category: categoryId,
+        date: "2026-09-10",
+        description: "Synthetic current-cycle purchase",
+        idempotencyKey: randomUUID(),
+        installmentCount: 1,
+        paymentMethod: creditId,
+        type: "expense",
+      },
+      contextB,
+    );
+
+    const priorInvoiceId = `credit-card-invoice:${creditId}:2026-09`;
+    const repaymentKey = randomUUID();
+    const repayment = await clientB.from("transactions").insert({
+      amount: 175,
+      date: "2026-09-25",
+      description: encryptDescription("Synthetic full early repayment"),
+      entry_idempotency_key: repaymentKey,
+      entry_kind: "repayment",
+      kind: "expense",
+      notes: encryptField(`invoice_advance:${priorInvoiceId}`),
+      payment_method_id: bankId,
+      related_invoice_id: priorInvoiceId,
+      user_id: userB.id,
+    });
+    expect(repayment.error).toBeNull();
+    const duplicateRepayment = await clientB.from("transactions").insert({
+      amount: 175,
+      date: "2026-09-25",
+      description: encryptDescription("Synthetic full early repayment"),
+      entry_idempotency_key: repaymentKey,
+      entry_kind: "repayment",
+      kind: "expense",
+      notes: encryptField(`invoice_advance:${priorInvoiceId}`),
+      payment_method_id: bankId,
+      related_invoice_id: priorInvoiceId,
+      user_id: userB.id,
+    });
+    expect(duplicateRepayment.error?.code).toBe("23505");
+
+    const purchaseKey = randomUUID();
+    const nextCyclePurchase = await createTransaction(
+      {
+        amount: 25,
+        category: categoryId,
+        date: "2026-09-29",
+        description: "Synthetic next-cycle purchase",
+        idempotencyKey: purchaseKey,
+        installmentCount: 1,
+        paymentMethod: creditId,
+        type: "expense",
+      },
+      contextB,
+    );
+    const replayedPurchase = await createTransaction(
+      {
+        amount: 25,
+        category: categoryId,
+        date: "2026-09-29",
+        description: "Synthetic next-cycle purchase",
+        idempotencyKey: purchaseKey,
+        installmentCount: 1,
+        paymentMethod: creditId,
+        type: "expense",
+      },
+      contextB,
+    );
+    expect(replayedPurchase).toBe(nextCyclePurchase);
+
+    const assertConsistentReadModels = async (
+      expectedLiability: number,
+      expectedSeptemberSpend: number,
+    ) => {
+      const [balances, dashboard, payments, mcpDashboard, september] =
+        await Promise.all([
+          listAccountBalances(contextB),
+          getCatWalletDashboardData("2026-10", contextB),
+          getPaymentsDueData("2026-10", contextB),
+          defaultReadModels.getDashboard("2026-10", contextB),
+          getMonthlySummary("2026-09", contextB),
+        ]);
+      expect(
+        balances.find((item) => item.id === creditId)?.currentLiability,
+      ).toBe(expectedLiability);
+      expect(dashboard.nextDue).toBeNull();
+      expect(payments.invoices).toEqual([]);
+      expect(payments.summary.totalInvoices).toBe(0);
+      expect(payments.summary.nextDueDate).toBeNull();
+      expect(mcpDashboard.nextDue).toBeNull();
+      expect(september.totalExpenses).toBe(expectedSeptemberSpend);
+    };
+
+    await assertConsistentReadModels(25, 100);
+
+    const refund = await clientB.from("transactions").insert({
+      amount: 5,
+      category_id: categoryId,
+      date: "2026-09-29",
+      description: encryptDescription("Synthetic card refund"),
+      entry_idempotency_key: randomUUID(),
+      entry_kind: "refund",
+      kind: "expense",
+      payment_method_id: creditId,
+      user_id: userB.id,
+    });
+    expect(refund.error).toBeNull();
+    await assertConsistentReadModels(20, 95);
+
+    await deleteTransaction(nextCyclePurchase, contextB);
+    await assertConsistentReadModels(0, 70);
+    await restoreTransaction(nextCyclePurchase, contextB);
+    await assertConsistentReadModels(20, 95);
+
+    expect(await listAccountBalances(contextA)).toEqual(otherUserBefore);
   });
 
   it("previews and persists an owned import batch with replay, undo, and restore", async () => {

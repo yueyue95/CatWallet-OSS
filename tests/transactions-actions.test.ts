@@ -5,34 +5,53 @@ vi.mock("next/cache", () => ({ revalidatePath }));
 
 const {
   advanceInstallments,
+  createAccountTransferWithResult,
   createCategory,
   createInvoiceAdvancePayment,
   createPaymentMethod,
+  createReimbursementWithResult,
   createSubscription,
   createTransaction,
   deleteCategory,
+  deleteAccountTransfer,
+  deleteInstallment,
   deleteInstallments,
   deletePaymentMethod,
   deleteSubscription,
   deleteSubscriptionOccurrences,
   deleteTransaction,
   previewInstallmentPrepayment,
+  previewDeleteInstallment,
   setSubscriptionPaused,
+  restoreAccountTransfer,
+  restoreInstallment,
   updateCategory,
+  updateAccountTransfer,
   updatePaymentMethod,
   updateSubscription,
   updateTransaction,
   markCoolingItemPurchased,
 } = vi.hoisted(() => ({
   advanceInstallments: vi.fn().mockResolvedValue(undefined),
+  createAccountTransferWithResult: vi.fn().mockResolvedValue({
+    replayed: false,
+    revision: 1,
+    transferId: "11111111-1111-4111-8111-111111111111",
+  }),
   createCategory: vi.fn().mockResolvedValue(undefined),
   createInvoiceAdvancePayment: vi.fn().mockResolvedValue(undefined),
   createPaymentMethod: vi.fn().mockResolvedValue(undefined),
+  createReimbursementWithResult: vi.fn().mockResolvedValue({
+    replayed: false,
+    transactionId: "11111111-1111-4111-8111-111111111111",
+  }),
   createSubscription: vi.fn().mockResolvedValue(undefined),
   createTransaction: vi
     .fn()
     .mockResolvedValue("11111111-1111-4111-8111-111111111111"),
   deleteCategory: vi.fn().mockResolvedValue(undefined),
+  deleteAccountTransfer: vi.fn().mockResolvedValue(2),
+  deleteInstallment: vi.fn().mockResolvedValue(undefined),
   deleteInstallments: vi.fn().mockResolvedValue(undefined),
   deletePaymentMethod: vi.fn().mockResolvedValue(undefined),
   deleteSubscription: vi.fn().mockResolvedValue(undefined),
@@ -44,8 +63,17 @@ const {
     targetMonth: "2026-07",
     totalAmount: 0,
   }),
+  previewDeleteInstallment: vi.fn().mockResolvedValue({
+    blockers: [],
+    canDelete: true,
+    occurrenceCount: 2,
+    planId: "11111111-1111-4111-8111-111111111111",
+  }),
   setSubscriptionPaused: vi.fn().mockResolvedValue(undefined),
+  restoreAccountTransfer: vi.fn().mockResolvedValue(3),
+  restoreInstallment: vi.fn().mockResolvedValue(undefined),
   updateCategory: vi.fn().mockResolvedValue(undefined),
+  updateAccountTransfer: vi.fn().mockResolvedValue(2),
   updatePaymentMethod: vi.fn().mockResolvedValue(undefined),
   updateSubscription: vi.fn().mockResolvedValue(undefined),
   updateTransaction: vi.fn().mockResolvedValue(undefined),
@@ -54,20 +82,28 @@ const {
 
 vi.mock("@/lib/finance/transactions", () => ({
   advanceInstallments,
+  createAccountTransferWithResult,
   createCategory,
   createInvoiceAdvancePayment,
   createPaymentMethod,
+  createReimbursementWithResult,
   createSubscription,
   createTransaction,
   deleteCategory,
+  deleteAccountTransfer,
+  deleteInstallment,
   deleteInstallments,
   deletePaymentMethod,
   deleteSubscription,
   deleteSubscriptionOccurrences,
   deleteTransaction,
   previewInstallmentPrepayment,
+  previewDeleteInstallment,
   setSubscriptionPaused,
+  restoreAccountTransfer,
+  restoreInstallment,
   updateCategory,
+  updateAccountTransfer,
   updatePaymentMethod,
   updateSubscription,
   updateTransaction,
@@ -75,29 +111,124 @@ vi.mock("@/lib/finance/transactions", () => ({
 
 vi.mock("@/lib/finance/cooling", () => ({ markCoolingItemPurchased }));
 
+const { addAccountBalanceAdjustment, setAccountOpeningBalance } = vi.hoisted(
+  () => ({
+    addAccountBalanceAdjustment: vi.fn().mockResolvedValue(undefined),
+    setAccountOpeningBalance: vi.fn().mockResolvedValue(undefined),
+  }),
+);
+
+vi.mock("@/lib/finance/account-balances", () => ({
+  addAccountBalanceAdjustment,
+  setAccountOpeningBalance,
+}));
+
 import {
   advanceInstallmentsAction,
+  createAccountTransferAction,
   createCategoryAction,
   createInvoiceAdvancePaymentAction,
   createPaymentMethodAction,
+  createReimbursementAction,
   createSubscriptionAction,
   createTransactionAction,
   deleteCategoryAction,
+  deleteAccountTransferAction,
   deleteInstallmentsAction,
+  deleteInstallmentAction,
   deletePaymentMethodAction,
   deleteSubscriptionAction,
   deleteSubscriptionOccurrencesAction,
   deleteTransactionAction,
   pauseSubscriptionAction,
   previewInstallmentPrepaymentAction,
+  previewDeleteInstallmentAction,
   resumeSubscriptionAction,
+  restoreAccountTransferAction,
+  restoreInstallmentAction,
+  setAccountOpeningBalanceAction,
+  addAccountBalanceAdjustmentAction,
   updateCategoryAction,
+  updateAccountTransferAction,
   updatePaymentMethodAction,
   updateSubscriptionAction,
   updateTransactionAction,
 } from "@/app/transactions/actions";
 
 const uuid = "11111111-1111-4111-8111-111111111111";
+const secondUuid = "22222222-2222-4222-8222-222222222222";
+
+describe("linked ledger actions", () => {
+  const transfer = {
+    amount: 150,
+    date: "2026-09-30",
+    description: "Synthetic transfer",
+    destinationAccountId: secondUuid,
+    idempotencyKey: uuid,
+    sourceAccountId: uuid,
+  };
+
+  it("validates and delegates the transfer lifecycle", async () => {
+    await expect(createAccountTransferAction(transfer)).resolves.toMatchObject({
+      revision: 1,
+      transferId: uuid,
+    });
+    await expect(
+      updateAccountTransferAction({
+        amount: transfer.amount,
+        date: transfer.date,
+        description: transfer.description,
+        destinationAccountId: transfer.destinationAccountId,
+        expectedRevision: 1,
+        id: uuid,
+        sourceAccountId: transfer.sourceAccountId,
+      }),
+    ).resolves.toBe(2);
+    await expect(
+      deleteAccountTransferAction({ expectedRevision: 1, id: uuid }),
+    ).resolves.toBe(2);
+    await expect(
+      restoreAccountTransferAction({ expectedRevision: 2, id: uuid }),
+    ).resolves.toBe(3);
+  });
+
+  it("delegates an owner-linked reimbursement", async () => {
+    await expect(
+      createReimbursementAction({
+        amount: 11.2,
+        date: "2026-09-30",
+        description: "Synthetic reimbursement",
+        idempotencyKey: uuid,
+        originalTransactionId: uuid,
+        paymentMethod: secondUuid,
+      }),
+    ).resolves.toMatchObject({ transactionId: uuid });
+  });
+
+  it("delegates installment group lifecycle and account balance actions", async () => {
+    await expect(
+      previewDeleteInstallmentAction({ planId: uuid }),
+    ).resolves.toMatchObject({ canDelete: true });
+    await deleteInstallmentAction({ planId: uuid });
+    await restoreInstallmentAction({ planId: uuid });
+    await setAccountOpeningBalanceAction({
+      amount: 1000,
+      effectiveDate: "2026-09-30",
+      paymentMethodId: uuid,
+    });
+    await addAccountBalanceAdjustmentAction({
+      amount: -5,
+      effectiveDate: "2026-09-30",
+      note: "Correction",
+      paymentMethodId: uuid,
+    });
+
+    expect(deleteInstallment).toHaveBeenCalledWith(uuid);
+    expect(restoreInstallment).toHaveBeenCalledWith(uuid);
+    expect(setAccountOpeningBalance).toHaveBeenCalledOnce();
+    expect(addAccountBalanceAdjustment).toHaveBeenCalledOnce();
+  });
+});
 
 describe("createTransactionAction", () => {
   const input = {
@@ -174,6 +305,11 @@ describe("createTransactionAction", () => {
       "insert failed",
     );
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("preserves a non-Error transaction failure", async () => {
+    createTransaction.mockRejectedValueOnce("insert failed");
+    await expect(createTransactionAction(input)).rejects.toBe("insert failed");
   });
 
   it("accepts investment (saving) transactions", async () => {

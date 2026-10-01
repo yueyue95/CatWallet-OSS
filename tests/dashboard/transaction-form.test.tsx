@@ -60,6 +60,8 @@ const translations: Record<string, string> = {
   "transaction.installmentMode.perInstallment": "Per installment",
   "transaction.installmentMode.total": "Total amount",
   "transaction.currentInstallment": "Current installment",
+  "transaction.fixedCommitment": "Replace fixed commitment",
+  "transaction.fixedCommitmentNone": "Do not replace a commitment",
   "transaction.currentInstallmentError":
     "Current installment must be within the planned range.",
   "transaction.totalAmount": "Total installment amount",
@@ -410,6 +412,42 @@ describe("handlePaymentMethodChange defensive fallback", () => {
 });
 
 describe("installment eligibility across payment method types", () => {
+  it("submits an equivalent fixed commitment for atomic installment conversion", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn().mockResolvedValue(createSuccess);
+    render(
+      <TransactionForm
+        {...baseProps({
+          onSubmit,
+          paymentMethods: paymentMethodsAllTypes,
+          fixedCommitments: [
+            { amount: 100, id: "commitment-1", name: "Synthetic plan" },
+          ],
+        })}
+      />,
+    );
+    fillRequiredFields();
+    fireEvent.click(screen.getByText("Credit Card"));
+    await user.click(screen.getByRole("combobox", { name: "Installments" }));
+    await user.click(
+      within(await screen.findByRole("listbox")).getByText("3x"),
+    );
+    await user.click(
+      screen.getByRole("combobox", { name: "Replace fixed commitment" }),
+    );
+    await user.click(
+      within(await screen.findByRole("listbox")).getByText(
+        "Synthetic plan · RM100.00",
+      ),
+    );
+    submit();
+    await vi.waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ fixedCommitmentId: "commitment-1" }),
+      ),
+    );
+  });
+
   it("shows the installment select for credit/boleto/label-contains-boleto methods and hides it for debit, resetting the count on non-installment methods", async () => {
     const user = userEvent.setup();
     render(

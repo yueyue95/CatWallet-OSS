@@ -1,6 +1,9 @@
 import { type Transaction, type TransactionGroup } from "@/lib/data";
 import { GROUP_COLORS } from "@/lib/finance/group-colors";
-import { isRepaymentTransaction } from "@/lib/finance/transaction-semantics";
+import {
+  getPersonalSpendingAmount,
+  isRepaymentTransaction,
+} from "@/lib/finance/transaction-semantics";
 
 type ExpenseCategoryGroup = Exclude<TransactionGroup, "income">;
 
@@ -30,6 +33,10 @@ export function buildExpensesByCategoryData(
         isCategoryGroup(transaction.group),
     )
     .reduce((acc, transaction) => {
+      const personalAmount =
+        transaction.type === "expense"
+          ? getPersonalSpendingAmount(transaction, transactions)
+          : Math.abs(transaction.amount);
       const group = transaction.group as ExpenseCategoryGroup;
       const groupKey = `data.group.${group}`;
       const categoryIdentity = transaction.categoryId
@@ -44,7 +51,7 @@ export function buildExpensesByCategoryData(
       });
 
       if (existing) {
-        existing.value += Math.abs(transaction.amount);
+        existing.value += personalAmount;
       } else {
         acc.push({
           categoryId: transaction.categoryId ?? null,
@@ -52,7 +59,7 @@ export function buildExpensesByCategoryData(
           group,
           groupKey,
           nameKey: transaction.categoryKey,
-          value: Math.abs(transaction.amount),
+          value: personalAmount,
         });
       }
 

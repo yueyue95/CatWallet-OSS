@@ -5,18 +5,25 @@ import {
 } from "@/lib/finance/account-balances";
 import {
   archiveGoal,
+  createAccountTransferWithResult,
   createCategory,
   createGoal,
   createPaymentMethod,
+  createReimbursementWithResult,
   archiveCategory,
   deleteCategory,
+  deleteInstallment,
+  deleteAccountTransfer,
   deletePaymentMethod,
   deleteTransaction,
   restoreTransaction,
+  restoreInstallment,
+  restoreAccountTransfer,
   updateCategory,
   updateGoal,
   updatePaymentMethod,
   updateTransaction,
+  updateAccountTransfer,
   createTransactionsBatchWithResult,
   createTransactionWithResult,
   advanceInstallments,
@@ -479,6 +486,145 @@ export async function restoreTransactionMutation(
   );
 }
 
+type AccountTransferMutationInput = {
+  amount: number;
+  date: string;
+  description: string;
+  destinationAccountId: string;
+  notes?: string | null;
+  sourceAccountId: string;
+};
+
+export async function createAccountTransferMutation(
+  input: AccountTransferMutationInput & { idempotencyKey: string },
+  context: AuthenticatedUserContext,
+) {
+  return runIdempotent(
+    context,
+    {
+      action: "create",
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+      toolName: "create_account_transfer",
+    },
+    async (entityId) => {
+      const created = await createAccountTransferWithResult(
+        { ...input, idempotencyKey: entityId },
+        context,
+      );
+      return { entityId: created.transferId, result: created };
+    },
+  );
+}
+
+export async function updateAccountTransferMutation(
+  input: AccountTransferMutationInput & {
+    expectedRevision: number;
+    id: string;
+    idempotencyKey: string;
+  },
+  context: AuthenticatedUserContext,
+) {
+  return runIdempotent(
+    context,
+    {
+      action: "update",
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+      toolName: "update_account_transfer",
+    },
+    async () => ({
+      entityId: input.id,
+      result: {
+        id: input.id,
+        revision: await updateAccountTransfer(input, context),
+      },
+    }),
+  );
+}
+
+async function accountTransferLifecycleMutation(
+  operation: "delete" | "restore",
+  input: { expectedRevision: number; id: string; idempotencyKey: string },
+  context: AuthenticatedUserContext,
+) {
+  return runIdempotent(
+    context,
+    {
+      action: operation,
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+      toolName: `${operation}_account_transfer`,
+    },
+    async () => ({
+      entityId: input.id,
+      result: {
+        id: input.id,
+        revision:
+          operation === "delete"
+            ? await deleteAccountTransfer(
+                input.id,
+                input.expectedRevision,
+                context,
+              )
+            : await restoreAccountTransfer(
+                input.id,
+                input.expectedRevision,
+                context,
+              ),
+      },
+    }),
+  );
+}
+
+export async function deleteAccountTransferMutation(
+  input: { expectedRevision: number; id: string; idempotencyKey: string },
+  context: AuthenticatedUserContext,
+) {
+  return accountTransferLifecycleMutation("delete", input, context);
+}
+
+export async function restoreAccountTransferMutation(
+  input: { expectedRevision: number; id: string; idempotencyKey: string },
+  context: AuthenticatedUserContext,
+) {
+  return accountTransferLifecycleMutation("restore", input, context);
+}
+
+export async function createReimbursementMutation(
+  input: {
+    amount: number;
+    date: string;
+    description: string;
+    idempotencyKey: string;
+    notes?: string | null;
+    originalTransactionId: string;
+    paymentAccountId: string;
+  },
+  context: AuthenticatedUserContext,
+) {
+  return runIdempotent(
+    context,
+    {
+      action: "create",
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+      toolName: "create_reimbursement",
+    },
+    async (entityId) => {
+      const created = await createReimbursementWithResult(
+        {
+          ...input,
+          idempotencyKey: entityId,
+          paymentMethod: input.paymentAccountId,
+        },
+        context,
+      );
+      return { entityId: created.transactionId, result: created };
+    },
+  );
+}
+
 export async function createInstallmentMutation(
   input: {
     amount: number;
@@ -487,6 +633,7 @@ export async function createInstallmentMutation(
     currentInstallment: number;
     date: string;
     description: string;
+    fixedCommitmentId?: string | null;
     idempotencyKey: string;
     notes?: string | null;
     paymentAccountId: string;
@@ -514,6 +661,7 @@ export async function createInstallmentMutation(
           category: input.categoryId,
           date: input.date,
           description: input.description,
+          fixedCommitmentId: input.fixedCommitmentId ?? undefined,
           idempotencyKey: transactionId,
           installmentAmountMode: input.amountMode,
           installmentCount: input.totalInstallments,
@@ -641,6 +789,50 @@ export async function completeInstallmentMutation(
       return {
         entityId: input.transactionId,
         result: { completed: true, transactionId: input.transactionId },
+      };
+    },
+  );
+}
+
+export async function deleteInstallmentMutation(
+  input: { idempotencyKey: string; planId: string },
+  context: AuthenticatedUserContext,
+) {
+  return runIdempotent(
+    context,
+    {
+      action: "delete",
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+      toolName: "delete_installment",
+    },
+    async () => {
+      await deleteInstallment(input.planId, context);
+      return {
+        entityId: input.planId,
+        result: { deleted: true, planId: input.planId },
+      };
+    },
+  );
+}
+
+export async function restoreInstallmentMutation(
+  input: { idempotencyKey: string; planId: string },
+  context: AuthenticatedUserContext,
+) {
+  return runIdempotent(
+    context,
+    {
+      action: "restore",
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+      toolName: "restore_installment",
+    },
+    async () => {
+      await restoreInstallment(input.planId, context);
+      return {
+        entityId: input.planId,
+        result: { planId: input.planId, restored: true },
       };
     },
   );

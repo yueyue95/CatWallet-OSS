@@ -12,16 +12,20 @@ import {
 } from "@/mcp/mutations";
 import {
   addBalanceAdjustmentSchema,
+  accountTransferLifecycleSchema,
   archiveCategorySchema,
   coolingItemSchema,
   createCategorySchema,
+  createAccountTransferSchema,
   createInstallmentSchema,
   createInstallmentTransportSchema,
   createPaymentAccountSchema,
+  createReimbursementSchema,
   deleteCategorySchema,
   deleteCoolingItemSchema,
   deleteGoalSchema,
   deletePaymentAccountSchema,
+  deleteInstallmentSchema,
   deleteSinkingFundSchema,
   emptyInputSchema,
   fixedCommitmentSchema,
@@ -45,6 +49,8 @@ import {
   installmentPaymentSchema,
   monthlyBudgetSchema,
   previewTransactionImportSchema,
+  previewDeleteInstallmentSchema,
+  previewAccountTransferSchema,
   transactionImportBatchReadSchema,
   transactionImportBatchMutationSchema,
   recordFixedCommitmentPaymentSchema,
@@ -52,7 +58,9 @@ import {
   sinkingFundSchema,
   setOpeningBalanceSchema,
   transactionLifecycleSchema,
+  restoreInstallmentSchema,
   updateCategorySchema,
+  updateAccountTransferSchema,
   updateCoolingItemSchema,
   updateFixedCommitmentSchema,
   updateGoalSchema,
@@ -64,6 +72,7 @@ import {
 } from "@/mcp/schemas";
 import {
   addBalanceAdjustmentMutation,
+  createAccountTransferMutation,
   archiveCategoryMutation,
   createCategoryMutation,
   createCoolingItemMutation,
@@ -72,8 +81,11 @@ import {
   createFixedCommitmentMutation,
   createGoalMutation,
   createPaymentAccountMutation,
+  createReimbursementMutation,
   createSinkingFundMutation,
   deletePaymentAccountMutation,
+  deleteAccountTransferMutation,
+  deleteInstallmentMutation,
   deleteTransactionMutation,
   deleteGoalMutation,
   deleteSinkingFundMutation,
@@ -82,11 +94,14 @@ import {
   recordGoalFundEntryMutation,
   recordSinkingFundEntryMutation,
   restoreTransactionMutation,
+  restoreAccountTransferMutation,
+  restoreInstallmentMutation,
   setCoolingItemStatusMutation,
   setFunMoneyBudgetMutation,
   setOpeningBalanceMutation,
   setMonthlyBudgetMutation,
   updateCategoryMutation,
+  updateAccountTransferMutation,
   updateCoolingItemMutation,
   updateFixedCommitmentMutation,
   updateGoalMutation,
@@ -119,6 +134,10 @@ import {
   getCoolingReleaseAt,
   getCoolingRemainingMs,
 } from "@/lib/finance/cooling-model";
+import {
+  previewAccountTransfer,
+  previewDeleteInstallment,
+} from "@/lib/finance/transactions";
 import {
   isFixedCommitmentInMonth,
   toMonthlyAmount,
@@ -353,6 +372,24 @@ export function createMcpServer(options: McpServerOptions) {
       ]);
       return { ...dashboard, funMoney };
     },
+  );
+
+  registerReadOnlyTool(
+    server,
+    options,
+    "preview_delete_installment",
+    "Preview whether an owned completed installment plan can be safely deleted as one group.",
+    previewDeleteInstallmentSchema,
+    async ({ planId }, context) => previewDeleteInstallment(planId, context),
+  );
+
+  registerReadOnlyTool(
+    server,
+    options,
+    "preview_account_transfer",
+    "Preview an owner-scoped same-currency account transfer without writing ledger rows.",
+    previewAccountTransferSchema,
+    async (input, context) => previewAccountTransfer(input, context),
   );
 
   registerReadOnlyTool(
@@ -699,6 +736,63 @@ export function createMcpServer(options: McpServerOptions) {
     "Complete an owned installment plan without deleting its historical transaction rows.",
     completeInstallmentSchema,
     (input, context) => completeInstallmentMutation(input, context),
+  );
+  registerMutationTool(
+    server,
+    options,
+    "delete_installment",
+    "Soft-delete an eligible completed installment plan and all of its occurrences atomically.",
+    deleteInstallmentSchema,
+    (input, context) => deleteInstallmentMutation(input, context),
+  );
+  registerMutationTool(
+    server,
+    options,
+    "restore_installment",
+    "Restore an owned soft-deleted installment plan and all of its occurrences atomically.",
+    restoreInstallmentSchema,
+    (input, context) => restoreInstallmentMutation(input, context),
+  );
+
+  registerMutationTool(
+    server,
+    options,
+    "create_account_transfer",
+    "Create one idempotent same-currency transfer with atomic source and destination ledger rows.",
+    createAccountTransferSchema,
+    (input, context) => createAccountTransferMutation(input, context),
+  );
+  registerMutationTool(
+    server,
+    options,
+    "update_account_transfer",
+    "Update both sides of an owned transfer atomically with optimistic revision checking.",
+    updateAccountTransferSchema,
+    (input, context) => updateAccountTransferMutation(input, context),
+  );
+  registerMutationTool(
+    server,
+    options,
+    "delete_account_transfer",
+    "Soft-delete both sides of an owned transfer atomically.",
+    accountTransferLifecycleSchema,
+    (input, context) => deleteAccountTransferMutation(input, context),
+  );
+  registerMutationTool(
+    server,
+    options,
+    "restore_account_transfer",
+    "Restore both sides of an owned transfer atomically.",
+    accountTransferLifecycleSchema,
+    (input, context) => restoreAccountTransferMutation(input, context),
+  );
+  registerMutationTool(
+    server,
+    options,
+    "create_reimbursement",
+    "Record an idempotent contra-expense receipt linked to an owned original expense.",
+    createReimbursementSchema,
+    (input, context) => createReimbursementMutation(input, context),
   );
 
   registerMutationTool(

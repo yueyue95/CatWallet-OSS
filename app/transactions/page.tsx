@@ -1,21 +1,28 @@
 import { AppShell } from "@/components/dashboard/app-shell";
 import { TransactionsScreen } from "@/components/dashboard/transactions-screen";
 import { TransactionCenterShortcuts } from "@/components/dashboard/transaction-center-shortcuts";
+import { listFixedCommitments } from "@/lib/finance/catwallet";
 import {
   getUserContext,
   getMonthlySummary,
   getTransactionFormOptions,
+  listAccountTransfers,
   listTransactions,
 } from "@/lib/finance/transactions";
 import {
   createCategoryAction,
+  createAccountTransferAction,
   advanceInstallmentsAction,
   createTransactionAction,
+  createReimbursementAction,
   deleteInstallmentsAction,
+  deleteAccountTransferAction,
   deleteSubscriptionOccurrencesAction,
   deleteTransactionAction,
   previewInstallmentPrepaymentAction,
   updateTransactionAction,
+  restoreAccountTransferAction,
+  updateAccountTransferAction,
   createPaymentMethodAction,
 } from "@/app/transactions/actions";
 
@@ -44,6 +51,14 @@ function resolveFlagParam(value: string | string[] | undefined): boolean {
   return Array.isArray(value) ? value[0] === "1" : value === "1";
 }
 
+function toFixedCommitmentOption({
+  amount,
+  id,
+  name,
+}: Awaited<ReturnType<typeof listFixedCommitments>>[number]) {
+  return { amount, id, name };
+}
+
 function resolveTransactionsPageParams(
   resolvedSearchParams: Awaited<TransactionsPageProps["searchParams"]>,
 ) {
@@ -65,6 +80,8 @@ async function getTransactionsPageData(
     transactionFormOptions,
     nextMonthTransactions,
     monthlySummary,
+    accountTransfers,
+    fixedCommitments,
   ] = await Promise.all([
     listTransactions({
       includeCreditCardInvoices: true,
@@ -85,6 +102,8 @@ async function getTransactionsPageData(
       userContext,
     }),
     getMonthlySummary(selectedMonth, userContext),
+    listAccountTransfers({ includeDeleted: true, userContext }),
+    listFixedCommitments(userContext),
   ]);
 
   const nextInvoiceTransactions = nextMonthTransactions.filter(
@@ -96,6 +115,8 @@ async function getTransactionsPageData(
     transactionFormOptions,
     nextInvoiceTransactions,
     monthlySummary,
+    accountTransfers,
+    fixedCommitments,
   };
 }
 
@@ -111,18 +132,25 @@ export default async function TransactionsPage({
     transactionFormOptions,
     nextInvoiceTransactions,
     monthlySummary,
+    accountTransfers,
+    fixedCommitments,
   } = await getTransactionsPageData(selectedMonth, showPrevious, userContext);
 
   return (
     <AppShell>
       <TransactionCenterShortcuts />
       <TransactionsScreen
+        accountTransfers={accountTransfers}
         categories={transactionFormOptions.categories}
+        fixedCommitments={fixedCommitments.map(toFixedCommitmentOption)}
         createCategoryAction={createCategoryAction}
         createPaymentMethodAction={createPaymentMethodAction}
         createTransactionAction={createTransactionAction}
+        createAccountTransferAction={createAccountTransferAction}
+        createReimbursementAction={createReimbursementAction}
         advanceInstallmentsAction={advanceInstallmentsAction}
         deleteInstallmentsAction={deleteInstallmentsAction}
+        deleteAccountTransferAction={deleteAccountTransferAction}
         deleteSubscriptionOccurrencesAction={
           deleteSubscriptionOccurrencesAction
         }
@@ -135,6 +163,8 @@ export default async function TransactionsPage({
         showNextInvoice={showNextInvoice}
         transactions={transactions}
         updateTransactionAction={updateTransactionAction}
+        restoreAccountTransferAction={restoreAccountTransferAction}
+        updateAccountTransferAction={updateAccountTransferAction}
       />
     </AppShell>
   );

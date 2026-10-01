@@ -33,12 +33,12 @@ Personal-finance tools often trade privacy for convenience or flatten cash flow,
 ## Core capabilities
 
 - **Safe to spend:** derives a practical monthly amount after active commitments, savings, and recorded spending.
-- **Transactions and categories:** income, expenses, savings, filtering, import semantics, soft deletion, and restoration.
+- **Transactions and categories:** income, expenses, savings, reimbursements, same-currency account transfers, filtering, import semantics, soft deletion, and restoration.
 - **Credit cards and repayments:** card liabilities, invoice periods, due dates, repayments, refunds, and transfers without double counting.
-- **Installments:** per-installment or total plans, early completion, and retirement of completed future projections.
+- **Installments:** per-installment or total plans, in-progress imports without recreating paid history, safe fixed-commitment conversion, early completion, and group-level deletion or restoration.
 - **Fixed commitments:** monthly, yearly, or custom recurring obligations.
 - **Sinking funds:** planned reserves with an immutable contribution and withdrawal ledger.
-- **Budgets and reports:** category limits, monthly detail, trends, cumulative balances, and exports.
+- **Budgets and reports:** category limits, gross and reimbursed spending, personal share, monthly detail, trends, cumulative balances, and exports.
 - **Goals and cooling list:** goal funding plus a deliberate waiting period for optional purchases.
 - **MCP assistance:** read tools and explicitly authorized mutations for compatible AI clients.
 

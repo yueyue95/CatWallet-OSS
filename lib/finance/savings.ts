@@ -3,7 +3,10 @@ import { type TransactionGroup, type TransactionType } from "@/lib/data";
 type TransactionLike = {
   amount: number;
   date: string;
+  entryKind?: string | null;
   group?: TransactionGroup;
+  id?: string;
+  relatedTransactionId?: string | null;
   type: TransactionType;
 };
 
@@ -117,19 +120,25 @@ function sumTransactionsByType(
   return toMoneyValue(
     transactions
       .filter((transaction) => transaction.type === type)
+      .filter(
+        (transaction) =>
+          type !== "income" || transaction.entryKind !== "reimbursement",
+      )
       .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0),
   );
 }
 
 function sumExpenses(transactions: TransactionLike[]) {
-  return toMoneyValue(
-    transactions
-      .filter(
-        (transaction) =>
-          transaction.type === "expense" && !isSavingsTransaction(transaction),
-      )
-      .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0),
-  );
+  const grossExpenses = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === "expense" && !isSavingsTransaction(transaction),
+    )
+    .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+  const reimbursements = transactions
+    .filter((transaction) => transaction.entryKind === "reimbursement")
+    .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+  return toMoneyValue(grossExpenses - reimbursements);
 }
 
 function sumSavings(transactions: TransactionLike[]) {

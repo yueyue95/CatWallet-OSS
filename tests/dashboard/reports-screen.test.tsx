@@ -39,6 +39,8 @@ const monthlyReport = {
   month: "2026-09",
   core: {
     actualExpenses: 120,
+    grossExpenses: 120,
+    reimbursedExpenses: 0,
     cashflowShortfall: 120,
     fixedCommitments: 0,
     funMoney: { budget: 0, percentage: 0, remaining: 0, spent: 0 },
@@ -67,11 +69,13 @@ const reportsData = {
     {
       excessExpenses: 120,
       expenses: 120,
+      grossExpenses: 120,
       grossSavings: 0,
       income: 0,
       month: "2026-09",
       monthKey: "screen.reports.month",
       netWorth: 0,
+      reimbursedExpenses: 0,
       savings: -120,
       year: "2026",
     },

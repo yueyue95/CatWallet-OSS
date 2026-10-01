@@ -180,6 +180,59 @@ export function getInvoicePaidAmount(
     .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
 }
 
+function getPreviousMonthValue(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const previousMonth = new Date(year, monthNumber - 2, 1);
+  return `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getPreviousInvoiceOverpayment(options: {
+  month: string;
+  paymentMethod: CreditCardInvoicePaymentMethod;
+  transactions: Transaction[];
+}) {
+  const previousMonth = getPreviousMonthValue(options.month);
+  const previousInvoiceId = getCreditCardInvoiceId(
+    options.paymentMethod.id,
+    previousMonth,
+  );
+  const previousPaidAmount = getInvoicePaidAmount(
+    options.transactions,
+    previousInvoiceId,
+  );
+  if (previousPaidAmount === 0) return 0;
+
+  const previousCycle = getCreditCardInvoiceCycle({
+    closingDay: options.paymentMethod.closingDay,
+    dueDay: options.paymentMethod.dueDay,
+    month: previousMonth,
+  });
+  const previousInvoiceAmount = getInvoicePurchases({
+    cycle: previousCycle,
+    month: previousMonth,
+    paymentMethod: options.paymentMethod,
+    transactions: options.transactions,
+  }).reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+
+  return Number(
+    Math.max(previousPaidAmount - previousInvoiceAmount, 0).toFixed(2),
+  );
+}
+
+function getInvoicePaidAmountWithCarry(options: {
+  invoiceId: string;
+  month: string;
+  paymentMethod: CreditCardInvoicePaymentMethod;
+  transactions: Transaction[];
+}) {
+  return Number(
+    (
+      getInvoicePaidAmount(options.transactions, options.invoiceId) +
+      getPreviousInvoiceOverpayment(options)
+    ).toFixed(2),
+  );
+}
+
 function buildCreditCardInvoiceTransaction(options: {
   cycle: { closingDate: string; dueDate: string; startsAt: string };
   invoiceId: string;
@@ -267,7 +320,12 @@ function buildInvoicesForPaymentMethod(options: {
     (sum, transaction) => sum + Math.abs(transaction.amount),
     0,
   );
-  const paidAmount = getInvoicePaidAmount(transactions, invoiceId);
+  const paidAmount = getInvoicePaidAmountWithCarry({
+    invoiceId,
+    month,
+    paymentMethod,
+    transactions,
+  });
   const invoiceTransaction = buildCreditCardInvoiceTransaction({
     cycle,
     invoiceId,

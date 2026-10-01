@@ -59,7 +59,7 @@ describe("installment retirement editor", () => {
             ...item,
             amountMode: "per_installment",
             endDate: "2026-12-16",
-            monthlyAmount: 500,
+            monthlyAmount: 463,
           },
         ]}
         sinkingFunds={[]}
@@ -70,6 +70,55 @@ describe("installment retirement editor", () => {
     expect(screen.getByText("每期金额")).toBeInTheDocument();
     expect(screen.getByText("2026年12月")).toBeInTheDocument();
     expect(screen.getByText("当前进度: 1/6")).toBeInTheDocument();
+  });
+
+  it("previews and deletes a completed installment group", async () => {
+    const preview = vi.fn().mockResolvedValue({
+      blockers: [],
+      canDelete: true,
+      occurrenceCount: 2,
+      planId: item.groupId,
+    });
+    const remove = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <InstallmentsScreen
+        categories={[]}
+        deleteInstallmentAction={remove}
+        items={[{ ...item, retired: true }]}
+        previewDeleteInstallmentAction={preview}
+        restoreInstallmentAction={vi.fn()}
+        saveAllocationAction={vi.fn()}
+        sinkingFunds={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "删除分期组" }));
+    await act(async () => {});
+    expect(preview).toHaveBeenCalledWith({ planId: item.groupId });
+    expect(remove).toHaveBeenCalledWith({ planId: item.groupId });
+  });
+
+  it("restores an archived installment group without opening its editor", async () => {
+    const restore = vi.fn().mockResolvedValue(undefined);
+    render(
+      <InstallmentsScreen
+        categories={[]}
+        deleteInstallmentAction={vi.fn()}
+        items={[{ ...item, archivedAt: "2026-09-30T00:00:00Z" }]}
+        previewDeleteInstallmentAction={vi.fn()}
+        restoreInstallmentAction={restore}
+        saveAllocationAction={vi.fn()}
+        sinkingFunds={[]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "设置退休去向" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "恢复分期组" }));
+    await act(async () => {});
+    expect(restore).toHaveBeenCalledWith({ planId: item.groupId });
   });
 
   it("A/B: starts closed, opens on click and cancels without a database call", () => {

@@ -25,6 +25,37 @@ const capabilities: McpCapability[] = [
   { name: "list_cooling_items", status: "available", write: false },
   { name: "get_account_balances", status: "available", write: false },
   { name: "preview_transaction_import", status: "available", write: false },
+  { name: "preview_account_transfer", status: "available", write: false },
+  {
+    idempotencyRequired: true,
+    name: "create_account_transfer",
+    status: "available",
+    write: true,
+  },
+  {
+    idempotencyRequired: true,
+    name: "update_account_transfer",
+    status: "available",
+    write: true,
+  },
+  {
+    idempotencyRequired: true,
+    name: "delete_account_transfer",
+    status: "available",
+    write: true,
+  },
+  {
+    idempotencyRequired: true,
+    name: "restore_account_transfer",
+    status: "available",
+    write: true,
+  },
+  {
+    idempotencyRequired: true,
+    name: "create_reimbursement",
+    status: "available",
+    write: true,
+  },
   {
     idempotencyRequired: true,
     name: "create_transaction",

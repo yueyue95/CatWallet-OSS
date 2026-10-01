@@ -24,6 +24,8 @@ import { toast } from "sonner";
 import type { CreateTransactionResult } from "@/lib/finance/transaction-result";
 
 import { AddTransactionDialog } from "@/components/dashboard/add-transaction-dialog";
+import { AccountTransfersPanel } from "@/components/dashboard/account-transfers-panel";
+import { ReimbursementDialog } from "@/components/dashboard/reimbursement-dialog";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { type TransactionFormData } from "@/components/dashboard/transaction-form";
 import { CurrencyInput } from "@/components/dashboard/form-inputs/currency-input";
@@ -75,12 +77,16 @@ import {
   type InstallmentDeleteScope,
 } from "@/lib/finance/installments";
 import {
+  type AccountTransfer,
   type AdvanceInstallmentsInput,
   type TransactionFormCategory,
   type TransactionFormPaymentMethod,
   type CreateCategoryInput,
+  type CreateAccountTransferInput,
+  type CreateReimbursementInput,
   type NewTransactionInput,
   type UpdateTransactionInput,
+  type UpdateAccountTransferInput,
   type CreatePaymentMethodInput,
   type DeleteInstallmentsInput,
   type DeleteSubscriptionOccurrencesInput,
@@ -122,7 +128,13 @@ type ConfirmRequest =
     };
 
 type TransactionsScreenProps = {
+  readonly accountTransfers?: AccountTransfer[];
   readonly categories: TransactionFormCategory[];
+  readonly fixedCommitments?: Array<{
+    amount: number;
+    id: string;
+    name: string;
+  }>;
   readonly advanceInstallmentsAction: (
     data: AdvanceInstallmentsInput,
   ) => Promise<void>;
@@ -133,6 +145,16 @@ type TransactionsScreenProps = {
   readonly createTransactionAction: (
     data: NewTransactionInput,
   ) => Promise<CreateTransactionResult>;
+  readonly createAccountTransferAction?: (
+    data: CreateAccountTransferInput,
+  ) => Promise<{ revision: number; transferId: string }>;
+  readonly createReimbursementAction?: (
+    data: CreateReimbursementInput,
+  ) => Promise<{ transactionId: string }>;
+  readonly deleteAccountTransferAction?: (data: {
+    expectedRevision: number;
+    id: string;
+  }) => Promise<number>;
   readonly deleteInstallmentsAction: (
     data: DeleteInstallmentsInput,
   ) => Promise<void>;
@@ -156,6 +178,13 @@ type TransactionsScreenProps = {
   readonly updateTransactionAction: (
     data: UpdateTransactionInput,
   ) => Promise<void>;
+  readonly restoreAccountTransferAction?: (data: {
+    expectedRevision: number;
+    id: string;
+  }) => Promise<number>;
+  readonly updateAccountTransferAction?: (
+    data: UpdateAccountTransferInput,
+  ) => Promise<number>;
 };
 
 type Translate = (key: string) => string;
@@ -3854,6 +3883,7 @@ type TransactionsScreenDialogsSectionProps = Pick<
   | "paymentMethods"
   | "createCategoryAction"
   | "createPaymentMethodAction"
+  | "fixedCommitments"
   | "transactions"
 > &
   Pick<
@@ -3959,10 +3989,40 @@ function TransactionsScreenDialogsSection(
         onOpenChange={props.setIsNewTransactionOpen}
         categories={props.categories}
         paymentMethods={props.paymentMethods}
+        fixedCommitments={props.fixedCommitments}
         createCategoryAction={props.createCategoryAction}
         createPaymentMethodAction={props.createPaymentMethodAction}
         onSubmit={props.handleNewTransactionSubmit}
       />
+    </>
+  );
+}
+
+function LinkedLedgerPanels({ props }: { props: TransactionsScreenProps }) {
+  return (
+    <>
+      {props.createReimbursementAction ? (
+        <div className="mb-4 flex justify-end">
+          <ReimbursementDialog
+            createAction={props.createReimbursementAction}
+            paymentMethods={props.paymentMethods}
+            transactions={props.transactions}
+          />
+        </div>
+      ) : null}
+      {props.createAccountTransferAction &&
+      props.deleteAccountTransferAction &&
+      props.restoreAccountTransferAction &&
+      props.updateAccountTransferAction ? (
+        <AccountTransfersPanel
+          createAction={props.createAccountTransferAction}
+          deleteAction={props.deleteAccountTransferAction}
+          paymentMethods={props.paymentMethods}
+          restoreAction={props.restoreAccountTransferAction}
+          transfers={props.accountTransfers ?? []}
+          updateAction={props.updateAccountTransferAction}
+        />
+      ) : null}
     </>
   );
 }
@@ -3989,8 +4049,10 @@ export function TransactionsScreen(props: TransactionsScreenProps) {
         showPrevious={props.showPrevious}
         {...state}
       />
+      <LinkedLedgerPanels props={props} />
       <TransactionsScreenDialogsSection
         categories={props.categories}
+        fixedCommitments={props.fixedCommitments}
         paymentMethods={props.paymentMethods}
         createCategoryAction={props.createCategoryAction}
         createPaymentMethodAction={props.createPaymentMethodAction}

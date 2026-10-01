@@ -71,13 +71,40 @@ function escapeHtml(value: string) {
 function getFallbackMonth(reportsData: ReportsData) {
   return {
     expenses: 0,
+    grossExpenses: 0,
     grossSavings: 0,
     income: 0,
     month: reportsData.selectedMonth,
     monthKey: "screen.reports.month",
     netWorth: 0,
+    reimbursedExpenses: 0,
     year: "",
   };
+}
+
+function buildIncomeVsExpensesData(
+  monthlyReports: ReportsData["monthlyReports"],
+  t: (key: string) => string,
+) {
+  return monthlyReports
+    .map((report) => ({
+      expenses: report.expenses,
+      income: report.income,
+      month: t(report.monthKey),
+    }))
+    .reverse();
+}
+
+function buildNetWorthData(
+  monthlyReports: ReportsData["monthlyReports"],
+  t: (key: string) => string,
+) {
+  return monthlyReports
+    .map((report) => ({
+      month: t(report.monthKey),
+      netWorth: report.netWorth,
+    }))
+    .reverse();
 }
 
 function useReportsScreenData(
@@ -101,25 +128,12 @@ function useReportsScreenData(
   );
 
   const incomeVsExpensesData = useMemo(
-    () =>
-      monthlyReports
-        .map((report) => ({
-          expenses: report.expenses,
-          income: report.income,
-          month: t(report.monthKey),
-        }))
-        .reverse(),
+    () => buildIncomeVsExpensesData(monthlyReports, t),
     [monthlyReports, t],
   );
 
   const netWorthData = useMemo(
-    () =>
-      monthlyReports
-        .map((report) => ({
-          month: t(report.monthKey),
-          netWorth: report.netWorth,
-        }))
-        .reverse(),
+    () => buildNetWorthData(monthlyReports, t),
     [monthlyReports, t],
   );
 
@@ -831,6 +845,14 @@ function MonthlyReportExpenseList({
             <p className="truncate text-xs text-muted-foreground">
               {t(item.category)} · {formatDate(item.date)}
             </p>
+            {item.reimbursedAmount > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {t("screen.reports.grossExpenseMetric")}:{" "}
+                {formatCurrency(item.grossAmount)} ·{" "}
+                {t("screen.reports.reimbursedExpenseMetric")}:{" "}
+                {formatCurrency(item.reimbursedAmount)}
+              </p>
+            ) : null}
           </div>
           <span className="shrink-0 font-medium text-expense">
             {formatCurrency(item.amount)}
@@ -942,6 +964,14 @@ function MonthlyCatWalletReport({
           <ReportMetric
             label={t("screen.reports.actualExpensesMetric")}
             value={formatCurrency(report.core.actualExpenses)}
+          />
+          <ReportMetric
+            label={t("screen.reports.grossExpenseMetric")}
+            value={formatCurrency(report.core.grossExpenses)}
+          />
+          <ReportMetric
+            label={t("screen.reports.reimbursedExpenseMetric")}
+            value={formatCurrency(report.core.reimbursedExpenses)}
           />
           <ReportMetric
             label={t("screen.reports.longTermSavingsMetric")}

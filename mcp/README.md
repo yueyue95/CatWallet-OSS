@@ -225,7 +225,21 @@ list_sinking_funds({ active?: boolean })
 list_fixed_commitments({ month?: string, active?: boolean })
 get_monthly_report({ month?: string })
 list_cooling_items({ status?: "cooling" | "ready" | "abandoned" | "purchased" | "all" })
+preview_account_transfer({ sourceAccountId, destinationAccountId, amount, date, description, notes?, id?, expectedRevision? })
+create_account_transfer({ sourceAccountId, destinationAccountId, amount, date, description, notes?, idempotencyKey })
+update_account_transfer({ id, expectedRevision, sourceAccountId, destinationAccountId, amount, date, description, notes?, idempotencyKey })
+delete_account_transfer({ id, expectedRevision, idempotencyKey })
+restore_account_transfer({ id, expectedRevision, idempotencyKey })
+create_reimbursement({ originalTransactionId, paymentAccountId, amount, date, description, notes?, idempotencyKey })
 ```
+
+Account transfers are MYR same-currency movements between non-credit accounts.
+They atomically maintain both ledger sides and do not count as income or expense.
+Reimbursements are contra-expense receipts linked to an original owned expense;
+they preserve the gross merchant charge and do not count as ordinary income.
+`create_installment.fixedCommitmentId` may identify an equivalent owned fixed
+commitment; successful plan creation disables that commitment in the same
+transaction so future safe-to-spend reservations are not duplicated.
 
 Successful calls return `{ ok: true, data: <tool-specific read model> }`.
 Handler-level failures return `{ ok: false, error: { code, message } }` with one

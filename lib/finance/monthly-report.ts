@@ -16,7 +16,11 @@ import {
   listTransactions,
   type AuthenticatedUserContext,
 } from "@/lib/finance/transactions";
-import { getSpendingAmount } from "@/lib/finance/transaction-semantics";
+import {
+  getIncomeAmount,
+  getPersonalSpendingAmount,
+  getSpendingAmount,
+} from "@/lib/finance/transaction-semantics";
 
 export type MonthlyReportSource = {
   month: string;
@@ -33,7 +37,9 @@ export type MonthlyReportExpense = {
   category: string;
   date: string;
   description: string;
+  grossAmount: number;
   id: string;
+  reimbursedAmount: number;
 };
 
 export type MonthlyReport = {
@@ -41,6 +47,8 @@ export type MonthlyReport = {
   core: {
     income: number;
     actualExpenses: number;
+    grossExpenses: number;
+    reimbursedExpenses: number;
     longTermSavings: number;
     sinkingFundReserve: number;
     fixedCommitments: number;
@@ -102,13 +110,22 @@ function monthOf(value: string) {
   return value.slice(0, 7);
 }
 
-function toExpense(transaction: Transaction): MonthlyReportExpense {
+function toExpense(
+  transaction: Transaction,
+  transactions: Transaction[],
+): MonthlyReportExpense {
+  const grossAmount = Number(getSpendingAmount(transaction).toFixed(2));
+  const personalAmount = Number(
+    getPersonalSpendingAmount(transaction, transactions).toFixed(2),
+  );
   return {
-    amount: Number(getSpendingAmount(transaction).toFixed(2)),
+    amount: personalAmount,
     category: transaction.categoryKey,
     date: transaction.date,
     description: transaction.descriptionKey,
+    grossAmount,
     id: transaction.id,
+    reimbursedAmount: Number((grossAmount - personalAmount).toFixed(2)),
   };
 }
 
@@ -122,25 +139,36 @@ export function buildMonthlyReport(source: MonthlyReportSource): MonthlyReport {
       getSpendingAmount(transaction) !== 0 && !isLongTermSavings(transaction),
   );
   const income = sum(
-    source.transactions
-      .filter((transaction) => transaction.type === "income")
-      .map((transaction) => amount(transaction.amount)),
+    source.transactions.map((transaction) => getIncomeAmount(transaction)),
+  );
+  const grossExpenses = sum(
+    expenses.map((transaction) => getSpendingAmount(transaction)),
   );
   const actualExpenses = sum(
-    expenses.map((transaction) => getSpendingAmount(transaction)),
+    expenses.map((transaction) =>
+      getPersonalSpendingAmount(transaction, source.transactions),
+    ),
+  );
+  const reimbursedExpenses = Number(
+    (grossExpenses - actualExpenses).toFixed(2),
   );
   const longTermSavings = sum(
     source.transactions
       .filter(isLongTermSavings)
       .map((transaction) => amount(transaction.amount)),
   );
-  const expenseItems = expenses.map(toExpense).sort(sortExpenses);
+  const expenseItems = expenses
+    .map((transaction) => toExpense(transaction, source.transactions))
+    .sort(sortExpenses);
   const categoryTotals = new Map<string, { amount: number; count: number }>();
 
   for (const transaction of expenses) {
     const key = transaction.categoryKey || "data.category.other";
     const current = categoryTotals.get(key) ?? { amount: 0, count: 0 };
-    current.amount += getSpendingAmount(transaction);
+    current.amount += getPersonalSpendingAmount(
+      transaction,
+      source.transactions,
+    );
     current.count += 1;
     categoryTotals.set(key, current);
   }
@@ -172,6 +200,7 @@ export function buildMonthlyReport(source: MonthlyReportSource): MonthlyReport {
     month: source.month,
     core: {
       actualExpenses,
+      grossExpenses,
       fixedCommitments: source.dashboard.safeToSpend.fixedCommitments,
       funMoney: {
         budget: source.funMoney.budget,
@@ -193,6 +222,7 @@ export function buildMonthlyReport(source: MonthlyReportSource): MonthlyReport {
         (income - actualExpenses - longTermSavings).toFixed(2),
       ),
       safeToSpend: source.dashboard.safeToSpend.safeToSpend,
+      reimbursedExpenses,
       sinkingFundReserve: source.dashboard.safeToSpend.futureReserves,
     },
     spendingByCategory: [...categoryTotals.entries()]
@@ -206,12 +236,16 @@ export function buildMonthlyReport(source: MonthlyReportSource): MonthlyReport {
       fixedCommitments: sum(
         expenses
           .filter((transaction) => transaction.fixedCommitmentId)
-          .map((transaction) => getSpendingAmount(transaction)),
+          .map((transaction) =>
+            getPersonalSpendingAmount(transaction, source.transactions),
+          ),
       ),
       funMoney: sum(
         expenses
           .filter((transaction) => transaction.countsTowardFunMoney)
-          .map((transaction) => getSpendingAmount(transaction)),
+          .map((transaction) =>
+            getPersonalSpendingAmount(transaction, source.transactions),
+          ),
       ),
     },
     topExpenses: expenseItems.slice(0, 3),

@@ -181,6 +181,27 @@ The table supports LGPD workflows for access, export, correction, deletion, cons
 
 Email/password signups and Google OAuth signups both insert users into `auth.users`, so both flows use the same `on_auth_user_created` onboarding trigger. Do not duplicate default profile, category, or payment-method setup in frontend code.
 
+## Linked ledger operations
+
+`installment_plans` and their occurrences distinguish historical progress,
+the evidenced current charge, and future schedule rows. Importing an in-progress
+plan does not recreate already-paid expenses. Completed plans use the dedicated
+group preview/delete/restore RPCs so ordinary transaction deletion cannot split
+the schedule.
+
+Reimbursements are income-shaped cash receipts linked to an original expense,
+but their `entry_kind = 'reimbursement'` keeps them out of ordinary income and
+reduces only the personal share of that purchase. The original merchant charge
+and credit-card liability remain gross.
+
+`account_transfers` is the parent record for a same-currency movement. A trigger
+maintains exactly two linked `transactions` rows (`out` and `in`) in the same
+database transaction. Transfer rows affect the two account balances but are
+excluded from income, spending, credit-card liability, and cumulative reports.
+Create, update, soft-delete, and restore use owner-scoped RPCs; updates require
+the current revision to detect concurrent edits. Credit accounts are rejected
+because card repayments retain their existing invoice-payment semantics.
+
 ## Applying migrations
 
 Preferred:

@@ -181,6 +181,44 @@ describe("buildMonthlyReport", () => {
     ]);
   });
 
+  it("reports reimbursed group purchases as gross, reimbursed, and personal amounts", () => {
+    const report = buildMonthlyReport(
+      source({
+        transactions: [
+          expense({ id: "group-order", amount: -83.4 }),
+          ...[20.1, 17.2, 13.3].map((amount, index) => ({
+            amount,
+            categoryKey: "data.category.receipts",
+            date: `2026-09-${String(20 + index).padStart(2, "0")}`,
+            descriptionKey: `Synthetic reimbursement ${index + 1}`,
+            entryKind: "reimbursement" as const,
+            group: "income" as const,
+            id: `reimbursement-${index + 1}`,
+            relatedTransactionId: "group-order",
+            type: "income" as const,
+          })),
+        ],
+      }),
+    );
+
+    expect(report.core).toMatchObject({
+      actualExpenses: 32.8,
+      grossExpenses: 83.4,
+      income: 0,
+      netBalance: -32.8,
+      reimbursedExpenses: 50.6,
+    });
+    expect(report.topExpenses[0]).toMatchObject({
+      amount: 32.8,
+      grossAmount: 83.4,
+      id: "group-order",
+      reimbursedAmount: 50.6,
+    });
+    expect(report.spendingByCategory).toEqual([
+      expect.objectContaining({ amount: 32.8, count: 1 }),
+    ]);
+  });
+
   it("reports top three actual expenses and large one-time events", () => {
     const report = buildMonthlyReport(
       source({

@@ -364,6 +364,185 @@ describe("credit card invoices", () => {
     });
   });
 
+  it("applies an earlier invoice overpayment to the next invoice", () => {
+    const priorPurchase = makeTransaction({
+      amount: -100,
+      date: "2026-04-01",
+      id: "prior-cycle-purchase",
+    });
+    const invoicePurchase = makeTransaction({
+      amount: -75,
+      date: "2026-04-20",
+      id: "invoice-purchase",
+    });
+    const repayment = makeTransaction({
+      amount: -175,
+      date: "2026-05-05",
+      entryKind: "repayment",
+      id: "prior-invoice-repayment",
+      paymentMethodId: "bank-1",
+      paymentMethodType: "bank",
+      relatedInvoiceId: "credit-card-invoice:card-1:2026-04",
+    });
+
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        { closingDay: 7, dueDay: 14, id: "card-1", labelKey: "Card" },
+      ],
+      transactions: [priorPurchase, invoicePurchase, repayment],
+    });
+
+    expect(invoices).toEqual([]);
+  });
+
+  it("does not revive a repaid invoice after a next-cycle purchase", () => {
+    const transactions = [
+      makeTransaction({
+        amount: -100,
+        date: "2026-04-01",
+        id: "prior-cycle-purchase",
+      }),
+      makeTransaction({
+        amount: -75,
+        date: "2026-04-20",
+        id: "invoice-purchase",
+      }),
+      makeTransaction({
+        amount: -175,
+        date: "2026-05-05",
+        entryKind: "repayment",
+        id: "prior-invoice-repayment",
+        paymentMethodId: "bank-1",
+        paymentMethodType: "bank",
+        relatedInvoiceId: "credit-card-invoice:card-1:2026-04",
+      }),
+      makeTransaction({
+        amount: -25,
+        date: "2026-05-07",
+        id: "next-cycle-purchase",
+      }),
+    ];
+
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        { closingDay: 7, dueDay: 14, id: "card-1", labelKey: "Card" },
+      ],
+      transactions,
+    });
+
+    expect(invoices).toEqual([]);
+  });
+
+  it("keeps only the unpaid part after an earlier invoice partial overpayment", () => {
+    const transactions = [
+      makeTransaction({
+        amount: -100,
+        date: "2026-04-01",
+        id: "prior-cycle-purchase",
+      }),
+      makeTransaction({
+        amount: -75,
+        date: "2026-04-20",
+        id: "invoice-purchase",
+      }),
+      makeTransaction({
+        amount: -125,
+        date: "2026-05-05",
+        entryKind: "repayment",
+        id: "prior-invoice-repayment",
+        paymentMethodId: "bank-1",
+        paymentMethodType: "bank",
+        relatedInvoiceId: "credit-card-invoice:card-1:2026-04",
+      }),
+    ];
+
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        { closingDay: 7, dueDay: 14, id: "card-1", labelKey: "Card" },
+      ],
+      transactions,
+    });
+
+    expect(invoices[0]).toMatchObject({
+      amount: -50,
+      invoice: { paidAmount: 25, totalAmount: 75 },
+    });
+  });
+
+  it("does not reduce the next invoice when the earlier invoice was only paid exactly", () => {
+    const transactions = [
+      makeTransaction({
+        amount: -100,
+        date: "2026-04-01",
+        id: "prior-cycle-purchase",
+      }),
+      makeTransaction({
+        amount: -75,
+        date: "2026-04-20",
+        id: "invoice-purchase",
+      }),
+      makeTransaction({
+        amount: -100,
+        date: "2026-05-05",
+        entryKind: "repayment",
+        id: "prior-invoice-repayment",
+        paymentMethodId: "bank-1",
+        paymentMethodType: "bank",
+        relatedInvoiceId: "credit-card-invoice:card-1:2026-04",
+      }),
+    ];
+
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        { closingDay: 7, dueDay: 14, id: "card-1", labelKey: "Card" },
+      ],
+      transactions,
+    });
+
+    expect(invoices[0]).toMatchObject({
+      amount: -75,
+      invoice: { paidAmount: 0, totalAmount: 75 },
+    });
+  });
+
+  it("carries cent amounts without leaving a floating-point remainder", () => {
+    const transactions = [
+      makeTransaction({
+        amount: -10.01,
+        date: "2026-04-01",
+        id: "prior-cycle-purchase",
+      }),
+      makeTransaction({
+        amount: -0.02,
+        date: "2026-04-20",
+        id: "invoice-purchase",
+      }),
+      makeTransaction({
+        amount: -10.03,
+        date: "2026-05-05",
+        entryKind: "repayment",
+        id: "prior-invoice-repayment",
+        paymentMethodId: "bank-1",
+        paymentMethodType: "bank",
+        relatedInvoiceId: "credit-card-invoice:card-1:2026-04",
+      }),
+    ];
+
+    const { invoices } = createCreditCardInvoiceTransactions({
+      month: "2026-05",
+      paymentMethods: [
+        { closingDay: 7, dueDay: 14, id: "card-1", labelKey: "Card" },
+      ],
+      transactions,
+    });
+
+    expect(invoices).toEqual([]);
+  });
+
   it("counts advanced installments in the target invoice month only", () => {
     const advancedInstallment = makeTransaction({
       advancedToMonth: "2026-05",
