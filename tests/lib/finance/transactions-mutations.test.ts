@@ -800,6 +800,7 @@ describe("createInvoiceAdvancePayment", () => {
       qb({ data: { id: INVOICE_CREDIT_CARD_ID, type: "credit" }, error: null }),
       qb({ data: [], error: null }),
       qb({ data: [], error: null }),
+      qb({ data: [], error: null }),
       qb({ data: null, error: null }),
     ]);
     await expect(createInvoiceAdvancePayment(validInput)).rejects.toThrow(
@@ -810,6 +811,7 @@ describe("createInvoiceAdvancePayment", () => {
   it("replays a full repayment after the invoice is already closed", async () => {
     setup([
       qb({ data: { id: INVOICE_CREDIT_CARD_ID, type: "credit" }, error: null }),
+      qb({ data: [], error: null }),
       qb({ data: [], error: null }),
       qb({ data: [], error: null }),
       qb({ data: { id: "repayment-1" }, error: null }),
@@ -825,6 +827,7 @@ describe("createInvoiceAdvancePayment", () => {
       qb({ data: { id: INVOICE_CREDIT_CARD_ID, type: "credit" }, error: null }),
       qb({ data: [purchaseRow], error: null }),
       qb({ data: [], error: null }),
+      qb({ data: [], error: null }),
     ]);
     await expect(
       createInvoiceAdvancePayment({ ...validInput, amount: 300 }),
@@ -835,6 +838,7 @@ describe("createInvoiceAdvancePayment", () => {
     const supabase = setup([
       qb({ data: { id: INVOICE_CREDIT_CARD_ID, type: "credit" }, error: null }),
       qb({ data: [purchaseRow], error: null }),
+      qb({ data: [], error: null }),
       qb({ data: [], error: null }),
       qb({ error: null }),
     ]);
@@ -848,6 +852,7 @@ describe("createInvoiceAdvancePayment", () => {
     setup([
       qb({ data: { id: INVOICE_CREDIT_CARD_ID, type: "credit" }, error: null }),
       qb({ data: [purchaseRow], error: null }),
+      qb({ data: [], error: null }),
       qb({ data: [], error: null }),
       qb({ error: { message: "insert failed" } }),
     ]);

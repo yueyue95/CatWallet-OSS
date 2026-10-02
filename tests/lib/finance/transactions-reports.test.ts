@@ -89,12 +89,16 @@ function setup(
 // describe "what the transactions/categories/payment_methods table
 // returns" without hand-tracing Promise.all scheduling order.
 function makeTableSupabase(tableQueues: {
+  account_balance_entries?: Array<{ data?: unknown; error?: unknown }>;
   transactions?: Array<{ data?: unknown; error?: unknown }>;
   categories?: Array<{ data?: unknown; error?: unknown }>;
   payment_methods?: Array<{ data?: unknown; error?: unknown }>;
   monthly_budgets?: Array<{ data?: unknown; error?: unknown }>;
 }) {
   const queues: Record<string, Array<{ data?: unknown; error?: unknown }>> = {
+    account_balance_entries: [
+      ...(tableQueues.account_balance_entries ?? [{ data: [], error: null }]),
+    ],
     categories: [...(tableQueues.categories ?? [])],
     monthly_budgets: [
       ...(tableQueues.monthly_budgets ?? [{ data: null, error: null }]),
@@ -470,6 +474,7 @@ describe("listTransactions", () => {
         ],
         error: null,
       }),
+      qb({ data: [], error: null }),
     ]);
     const result = await listTransactions({
       includeCreditCardInvoices: true,
@@ -478,6 +483,58 @@ describe("listTransactions", () => {
     expect(result.find((t) => t.id === "purchase-1")).toBeUndefined();
     const invoice = result.find((t) => t.isCreditCardInvoice);
     expect(invoice).toBeDefined();
+  });
+
+  it("loads legacy card balance corrections when synthesizing invoices", async () => {
+    const supabase = setup([
+      qb({
+        data: [
+          row({
+            id: "closed-invoice-purchase",
+            amount: 300,
+            date: "2026-06-20",
+            payment_method_id: "pm-credit",
+            payment_methods: creditCard,
+          }),
+          row({
+            id: "next-cycle-purchase",
+            amount: 40,
+            date: "2026-07-03",
+            payment_method_id: "pm-credit",
+            payment_methods: creditCard,
+          }),
+        ],
+        error: null,
+      }),
+      qb({
+        data: [
+          {
+            amount: 300,
+            effective_date: "2026-07-05",
+            payment_method_id: "pm-credit",
+          },
+          {
+            amount: -600,
+            effective_date: "2026-07-05",
+            payment_method_id: "pm-credit",
+          },
+        ],
+        error: null,
+      }),
+    ]);
+
+    const result = await listTransactions({
+      includeCreditCardInvoices: true,
+      month: "2026-07",
+    });
+
+    expect(supabase.from).toHaveBeenCalledWith("account_balance_entries");
+    expect(result.some((transaction) => transaction.isCreditCardInvoice)).toBe(
+      false,
+    );
+    expect(result.map((transaction) => transaction.id)).toEqual([
+      "next-cycle-purchase",
+    ]);
   });
 
   it("preserves the underlying purchase (flagged) when preserveCreditCardInvoicePurchases is set", async () => {
@@ -494,6 +551,7 @@ describe("listTransactions", () => {
         ],
         error: null,
       }),
+      qb({ data: [], error: null }),
     ]);
     const result = await listTransactions({
       includeCreditCardInvoices: true,
@@ -518,6 +576,7 @@ describe("listTransactions", () => {
         ],
         error: null,
       }),
+      qb({ data: [], error: null }),
     ]);
     const result = await listTransactions({ includeCreditCardInvoices: true });
     expect(result.map((t) => t.id)).toEqual(["purchase-1"]);

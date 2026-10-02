@@ -35,6 +35,7 @@ import {
   type ExpensesByCategoryItem,
 } from "@/lib/finance/category-aggregation";
 import {
+  type CreditCardBalanceAdjustment,
   getCreditCardInvoiceCycle,
   getInvoiceAdvancePaymentInvoiceId,
   getInvoiceAdvancePaymentNote,
@@ -4289,6 +4290,7 @@ function resolveQueryStart(
 function finalizeTransactionRows(
   rows: TransactionRow[],
   params: {
+    balanceAdjustments: CreditCardBalanceAdjustment[];
     filterByMonth: typeof filterByFinancialMonth;
     includeCreditCardInvoices: boolean;
     includeFuture: boolean;
@@ -4316,6 +4318,7 @@ function finalizeTransactionRows(
   const resultTransactions =
     params.includeCreditCardInvoices && params.monthRange
       ? withCreditCardInvoiceTransactions({
+          balanceAdjustments: params.balanceAdjustments,
           month: params.monthRange.month,
           preservePurchases: params.preserveCreditCardInvoicePurchases,
           sourceTransactions: transactions,
@@ -4524,6 +4527,35 @@ async function fetchTransactionRows(
   return fetchLegacyTransactionRows(supabase, userId, params);
 }
 
+async function fetchCreditCardBalanceAdjustments(
+  supabase: SupabaseClient,
+  userId: string,
+  options: {
+    end: string;
+    start: string;
+  },
+): Promise<CreditCardBalanceAdjustment[]> {
+  const { data, error } = await supabase
+    .from("account_balance_entries")
+    .select("amount, effective_date, payment_method_id")
+    .eq("user_id", userId)
+    .eq("entry_type", "adjustment")
+    .gte("effective_date", options.start)
+    .lte("effective_date", options.end);
+
+  if (error) {
+    throw new Error(
+      `Unable to load credit card balance adjustments: ${error.message}`,
+    );
+  }
+
+  return (data ?? []).map((adjustment) => ({
+    amount: Number(adjustment.amount),
+    effectiveDate: adjustment.effective_date,
+    paymentMethodId: adjustment.payment_method_id,
+  }));
+}
+
 export type ListTransactionsOptions = {
   categoryId?: string;
   from?: string;
@@ -4604,8 +4636,16 @@ export async function listTransactions(options?: ListTransactionsOptions) {
     queryStart,
     type: options?.type,
   });
+  const balanceAdjustments =
+    flags.includeCreditCardInvoices && monthRange && queryStart
+      ? await fetchCreditCardBalanceAdjustments(supabase, userId, {
+          end: monthRange.end,
+          start: queryStart,
+        })
+      : [];
 
   return finalizeTransactionRows(rows, {
+    balanceAdjustments,
     filterByMonth,
     includeCreditCardInvoices: flags.includeCreditCardInvoices,
     includeFuture: flags.includeFuture,

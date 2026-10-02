@@ -22,6 +22,12 @@ export type CreditCardInvoiceTransaction = Transaction & {
   isPlanned: true;
 };
 
+export type CreditCardBalanceAdjustment = {
+  amount: number;
+  effectiveDate: string;
+  paymentMethodId: string;
+};
+
 const invoiceAdvanceNotePrefix = "invoice_advance:";
 
 export function getCreditCardInvoiceId(paymentMethodId: string, month: string) {
@@ -180,6 +186,23 @@ export function getInvoicePaidAmount(
     .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
 }
 
+function getInvoiceBalanceReduction(options: {
+  balanceAdjustments: CreditCardBalanceAdjustment[];
+  cycle: { closingDate: string; dueDate: string };
+  paymentMethodId: string;
+}) {
+  const netAdjustment = options.balanceAdjustments
+    .filter(
+      (adjustment) =>
+        adjustment.paymentMethodId === options.paymentMethodId &&
+        adjustment.effectiveDate > options.cycle.closingDate &&
+        adjustment.effectiveDate <= options.cycle.dueDate,
+    )
+    .reduce((sum, adjustment) => sum + adjustment.amount, 0);
+
+  return Number(Math.max(-netAdjustment, 0).toFixed(2));
+}
+
 function getPreviousMonthValue(month: string) {
   const [year, monthNumber] = month.split("-").map(Number);
   const previousMonth = new Date(year, monthNumber - 2, 1);
@@ -187,6 +210,7 @@ function getPreviousMonthValue(month: string) {
 }
 
 function getPreviousInvoiceOverpayment(options: {
+  balanceAdjustments: CreditCardBalanceAdjustment[];
   month: string;
   paymentMethod: CreditCardInvoicePaymentMethod;
   transactions: Transaction[];
@@ -196,17 +220,20 @@ function getPreviousInvoiceOverpayment(options: {
     options.paymentMethod.id,
     previousMonth,
   );
-  const previousPaidAmount = getInvoicePaidAmount(
-    options.transactions,
-    previousInvoiceId,
-  );
-  if (previousPaidAmount === 0) return 0;
-
   const previousCycle = getCreditCardInvoiceCycle({
     closingDay: options.paymentMethod.closingDay,
     dueDay: options.paymentMethod.dueDay,
     month: previousMonth,
   });
+  const previousPaidAmount =
+    getInvoicePaidAmount(options.transactions, previousInvoiceId) +
+    getInvoiceBalanceReduction({
+      balanceAdjustments: options.balanceAdjustments,
+      cycle: previousCycle,
+      paymentMethodId: options.paymentMethod.id,
+    });
+  if (previousPaidAmount === 0) return 0;
+
   const previousInvoiceAmount = getInvoicePurchases({
     cycle: previousCycle,
     month: previousMonth,
@@ -220,6 +247,8 @@ function getPreviousInvoiceOverpayment(options: {
 }
 
 function getInvoicePaidAmountWithCarry(options: {
+  balanceAdjustments: CreditCardBalanceAdjustment[];
+  cycle: { closingDate: string; dueDate: string };
   invoiceId: string;
   month: string;
   paymentMethod: CreditCardInvoicePaymentMethod;
@@ -228,6 +257,11 @@ function getInvoicePaidAmountWithCarry(options: {
   return Number(
     (
       getInvoicePaidAmount(options.transactions, options.invoiceId) +
+      getInvoiceBalanceReduction({
+        balanceAdjustments: options.balanceAdjustments,
+        cycle: options.cycle,
+        paymentMethodId: options.paymentMethod.id,
+      }) +
       getPreviousInvoiceOverpayment(options)
     ).toFixed(2),
   );
@@ -284,6 +318,7 @@ function buildCreditCardInvoiceTransaction(options: {
 }
 
 function buildInvoicesForPaymentMethod(options: {
+  balanceAdjustments: CreditCardBalanceAdjustment[];
   month: string;
   paymentMethod: CreditCardInvoicePaymentMethod;
   purchaseIds: Set<string>;
@@ -291,9 +326,7 @@ function buildInvoicesForPaymentMethod(options: {
 }): CreditCardInvoiceTransaction[] {
   const { month, paymentMethod, purchaseIds, transactions } = options;
 
-  if (paymentMethod.dueDay == null) {
-    return [];
-  }
+  if (paymentMethod.dueDay == null) return [];
 
   const invoiceId = getCreditCardInvoiceId(paymentMethod.id, month);
   const cycle = getCreditCardInvoiceCycle({
@@ -321,6 +354,8 @@ function buildInvoicesForPaymentMethod(options: {
     0,
   );
   const paidAmount = getInvoicePaidAmountWithCarry({
+    balanceAdjustments: options.balanceAdjustments,
+    cycle,
     invoiceId,
     month,
     paymentMethod,
@@ -339,6 +374,7 @@ function buildInvoicesForPaymentMethod(options: {
 }
 
 export function createCreditCardInvoiceTransactions(options: {
+  balanceAdjustments?: CreditCardBalanceAdjustment[];
   month: string;
   paymentMethods: CreditCardInvoicePaymentMethod[];
   transactions: Transaction[];
@@ -349,6 +385,7 @@ export function createCreditCardInvoiceTransactions(options: {
   const purchaseIds = new Set<string>();
   const invoices = options.paymentMethods.flatMap((paymentMethod) =>
     buildInvoicesForPaymentMethod({
+      balanceAdjustments: options.balanceAdjustments ?? [],
       month: options.month,
       paymentMethod,
       purchaseIds,
@@ -360,6 +397,7 @@ export function createCreditCardInvoiceTransactions(options: {
 }
 
 export function withCreditCardInvoiceTransactions(options: {
+  balanceAdjustments?: CreditCardBalanceAdjustment[];
   month: string;
   preservePurchases?: boolean;
   sourceTransactions: Transaction[];
@@ -386,6 +424,7 @@ export function withCreditCardInvoiceTransactions(options: {
   }
 
   const { invoices, purchaseIds } = createCreditCardInvoiceTransactions({
+    balanceAdjustments: options.balanceAdjustments,
     month: options.month,
     paymentMethods: [...creditPaymentMethods.values()],
     transactions: options.sourceTransactions,

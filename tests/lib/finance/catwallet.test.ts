@@ -367,6 +367,62 @@ describe("getCatWalletDashboardData credit card accounting", () => {
     expect(result.nextDue).toBeNull();
   });
 
+  it("does not leave a closed invoice due after a legacy balance correction", async () => {
+    const { invoices } = createCreditCardInvoiceTransactions({
+      balanceAdjustments: [
+        {
+          amount: 300,
+          effectiveDate: "2026-05-08",
+          paymentMethodId: "card",
+        },
+        {
+          amount: -600,
+          effectiveDate: "2026-05-08",
+          paymentMethodId: "card",
+        },
+      ],
+      month: "2026-05",
+      paymentMethods: [
+        {
+          closingDay: 7,
+          dueDay: 14,
+          id: "card",
+          labelKey: "Synthetic card",
+        },
+      ],
+      transactions: [
+        creditCardTransaction({
+          amount: -300,
+          date: "2026-04-20",
+          id: "closed-invoice-purchase",
+        }),
+        creditCardTransaction({
+          amount: -40,
+          date: "2026-05-07",
+          id: "next-cycle-purchase",
+        }),
+      ],
+    });
+    const result = await getCatWalletDashboardData(
+      "2026-05",
+      context({
+        balances: [
+          {
+            balanceTrackingEnabled: true,
+            currentBalance: null,
+            currentLiability: 40,
+            id: "card",
+          },
+        ] as unknown as AccountBalance[],
+        invoices,
+        transactions: [transaction(40, "2026-05-07", "purchase")],
+      }),
+    );
+
+    expect(result.accountBalances[0]?.currentLiability).toBe(40);
+    expect(result.nextDue).toBeNull();
+  });
+
   it("does not count a completed installment projection in future-month spending", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-26T12:00:00.000Z"));

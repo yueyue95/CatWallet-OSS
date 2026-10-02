@@ -589,6 +589,7 @@ describe("getPaymentsDueData", () => {
     const ctx = makeCtx([
       qb({ data: rows, error: null }),
       qb({ data: [], error: null }),
+      qb({ data: [], error: null }),
     ]);
 
     const result = await getPaymentsDueData(CURRENT_MONTH, ctx);
@@ -672,6 +673,7 @@ describe("getPaymentsDueData", () => {
     const ctx = makeCtx([
       qb({ data: rows, error: null }),
       qb({ data: [], error: null }),
+      qb({ data: [], error: null }),
     ]);
 
     const result = await getPaymentsDueData(CURRENT_MONTH, ctx);
@@ -682,7 +684,11 @@ describe("getPaymentsDueData", () => {
   });
 
   it("returns empty collections and a null next due date when there is nothing due, without an explicit userContext", async () => {
-    setup([qb({ data: [], error: null }), qb({ data: [], error: null })]);
+    setup([
+      qb({ data: [], error: null }),
+      qb({ data: [], error: null }),
+      qb({ data: [], error: null }),
+    ]);
 
     const result = await getPaymentsDueData(CURRENT_MONTH);
 

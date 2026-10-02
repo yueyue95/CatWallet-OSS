@@ -27,7 +27,10 @@ import {
   updateSinkingFund,
   upsertInstallmentRetirementAllocation,
 } from "@/lib/finance/catwallet";
-import { listAccountBalances } from "@/lib/finance/account-balances";
+import {
+  addAccountBalanceAdjustment,
+  listAccountBalances,
+} from "@/lib/finance/account-balances";
 import { defaultReadModels } from "@/mcp/services";
 import {
   abandonCoolingItem,
@@ -843,6 +846,79 @@ describe("local CatWallet CRUD and safe-to-spend", () => {
       await testClient.auth.signOut();
       await removeUserByEmail(testEmail);
     }
+  });
+});
+
+describe("local legacy credit-card balance corrections", () => {
+  it("closes the corrected invoice without hiding the next-cycle purchase", async () => {
+    const category = await defaultCategory(clientA, "needs");
+    const cardId = randomUUID();
+    const card = await clientA.from("payment_methods").insert({
+      balance_tracking_enabled: true,
+      closing_day: 7,
+      credit_limit: 5000,
+      due_day: 14,
+      id: cardId,
+      name: "Synthetic legacy correction card",
+      type: "credit",
+    });
+    expect(card.error).toBeNull();
+
+    const purchases = await clientA.from("transactions").insert([
+      {
+        amount: 300,
+        category_id: category.id,
+        date: "2026-04-20",
+        description: encryptDescription("Synthetic closed invoice purchase"),
+        entry_kind: "purchase",
+        kind: "expense",
+        payment_method_id: cardId,
+      },
+      {
+        amount: 40,
+        category_id: category.id,
+        date: "2026-05-07",
+        description: encryptDescription("Synthetic next-cycle purchase"),
+        entry_kind: "purchase",
+        kind: "expense",
+        payment_method_id: cardId,
+      },
+    ]);
+    expect(purchases.error).toBeNull();
+
+    await addAccountBalanceAdjustment({
+      amount: 300,
+      effectiveDate: "2026-05-08",
+      paymentMethodId: cardId,
+      userContext: contextA,
+    });
+    await addAccountBalanceAdjustment({
+      amount: -600,
+      effectiveDate: "2026-05-08",
+      paymentMethodId: cardId,
+      userContext: contextA,
+    });
+
+    const transactions = await listTransactions({
+      includeCreditCardInvoices: true,
+      month: "2026-05",
+      userContext: contextA,
+    });
+
+    expect(
+      transactions.some((transaction) => transaction.isCreditCardInvoice),
+    ).toBe(false);
+    expect(
+      transactions.filter(
+        (transaction) => transaction.paymentMethodId === cardId,
+      ),
+    ).toMatchObject([
+      {
+        amount: -40,
+        date: "2026-05-07",
+        entryKind: "purchase",
+      },
+    ]);
   });
 });
 
