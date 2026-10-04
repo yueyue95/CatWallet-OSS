@@ -903,12 +903,19 @@ function TransactionRowTitle({
             className="shrink-0 border-border bg-muted px-2 py-0 text-[10px] font-medium text-muted-foreground not-lg:hidden"
           />
         )}
+        {transaction.entryKind === "reimbursement" ? (
+          <Badge variant="secondary" className="shrink-0 text-[10px]">
+            {t("reimbursements.label")}
+          </Badge>
+        ) : null}
         <TransactionTypeIndicator type={transaction.type} />
       </div>
       <div className="mt-1 flex flex-col items-start align-middle gap-2 truncate w-full">
-        <Badge variant="secondary" className="text-xs ">
-          {t(transaction.categoryKey)}
-        </Badge>
+        {transaction.entryKind !== "reimbursement" ? (
+          <Badge variant="secondary" className="text-xs ">
+            {t(transaction.categoryKey)}
+          </Badge>
+        ) : null}
         {shouldPresentAsPlanned && (
           <PlannedBadge
             isCreditCardInvoice={isCreditCardInvoice}
@@ -1418,6 +1425,7 @@ type TransactionEditFormProps = {
   readonly incomeCategoryOption: CategoryOption;
   readonly paymentMethodOptions: CategoryOption[];
   readonly t: Translate;
+  readonly isReimbursement?: boolean;
   readonly resolveCategoryForType: (
     type: TransactionType,
     currentCategory: string,
@@ -1428,6 +1436,7 @@ type TransactionTypeAmountFieldsProps = {
   readonly formData: EditableTransaction;
   readonly setFormData: (data: EditableTransaction) => void;
   readonly t: Translate;
+  readonly isReimbursement?: boolean;
   readonly resolveCategoryForType: (
     type: TransactionType,
     currentCategory: string,
@@ -1438,40 +1447,47 @@ function TransactionTypeAmountFields({
   formData,
   setFormData,
   t,
+  isReimbursement,
   resolveCategoryForType,
 }: TransactionTypeAmountFieldsProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-2">
         <Label htmlFor="transaction-type">{t("transaction.type")}</Label>
-        <Select
-          value={formData.type}
-          onValueChange={(value) =>
-            setFormData({
-              ...formData,
-              category: resolveCategoryForType(
-                value as TransactionType,
-                formData.category,
-              ),
-              countsTowardFunMoney:
-                value === "expense" ? formData.countsTowardFunMoney : false,
-              type: value as TransactionType,
-            })
-          }
-        >
-          <SelectTrigger id="transaction-type">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="income">
-              {t("transaction.typeIncome")}
-            </SelectItem>
-            <SelectItem value="expense">
-              {t("transaction.typeExpense")}
-            </SelectItem>
-            <SelectItem value="saving">{t("common.saving")}</SelectItem>
-          </SelectContent>
-        </Select>
+        {isReimbursement ? (
+          <div className="flex h-10 items-center">
+            <Badge>{t("reimbursements.label")}</Badge>
+          </div>
+        ) : (
+          <Select
+            value={formData.type}
+            onValueChange={(value) =>
+              setFormData({
+                ...formData,
+                category: resolveCategoryForType(
+                  value as TransactionType,
+                  formData.category,
+                ),
+                countsTowardFunMoney:
+                  value === "expense" ? formData.countsTowardFunMoney : false,
+                type: value as TransactionType,
+              })
+            }
+          >
+            <SelectTrigger id="transaction-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="income">
+                {t("transaction.typeIncome")}
+              </SelectItem>
+              <SelectItem value="expense">
+                {t("transaction.typeExpense")}
+              </SelectItem>
+              <SelectItem value="saving">{t("common.saving")}</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
       <div className="space-y-2">
         <CurrencyInput
@@ -1629,6 +1645,7 @@ function TransactionEditForm({
   incomeCategoryOption,
   paymentMethodOptions,
   t,
+  isReimbursement,
   resolveCategoryForType,
 }: TransactionEditFormProps) {
   return (
@@ -1637,6 +1654,7 @@ function TransactionEditForm({
         formData={formData}
         setFormData={setFormData}
         t={t}
+        isReimbursement={isReimbursement}
         resolveCategoryForType={resolveCategoryForType}
       />
 
@@ -1975,6 +1993,7 @@ function TransactionDetailsDialogMainContent({
           incomeCategoryOption={incomeCategoryOption}
           paymentMethodOptions={paymentMethodOptions}
           t={t}
+          isReimbursement={selectedTransaction.entryKind === "reimbursement"}
           resolveCategoryForType={resolveCategoryForType}
         />
       )}

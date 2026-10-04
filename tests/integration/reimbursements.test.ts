@@ -8,7 +8,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encryptDescription } from "@/lib/crypto/field-encryption";
 import {
   createReimbursementWithResult,
+  deleteTransaction,
+  restoreTransaction,
   type AuthenticatedUserContext,
+  updateTransaction,
 } from "@/lib/finance/transactions";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -24,6 +27,7 @@ type Fixture = {
   context: AuthenticatedUserContext;
   creditAccountId: string;
   receivingAccountId: string;
+  secondReceivingAccountId: string;
   userId: string;
 };
 
@@ -51,19 +55,24 @@ async function createSyntheticAccounts(client: SupabaseClient<Database>) {
         name: "Synthetic receiving account",
         type: "bank",
       },
+      {
+        balance_tracking_enabled: true,
+        name: "Synthetic second receiving account",
+        type: "ewallet",
+      },
     ])
     .select("id, type");
   if (accounts.error) throw new Error(accounts.error.message);
   const creditAccount = accounts.data.find(
     (account) => account.type === "credit",
   );
-  const receivingAccount = accounts.data.find(
+  const receivingAccounts = accounts.data.filter(
     (account) => account.type !== "credit",
   );
-  if (!creditAccount || !receivingAccount) {
+  if (!creditAccount || receivingAccounts.length !== 2) {
     throw new Error("Synthetic reimbursement accounts were not created");
   }
-  return { creditAccount, receivingAccount };
+  return { creditAccount, receivingAccounts };
 }
 
 async function getNeedsCategoryId(client: SupabaseClient<Database>) {
@@ -117,7 +126,8 @@ async function createFixture(label: string): Promise<Fixture> {
       userId: signedIn.data.user.id,
     },
     creditAccountId: accounts.creditAccount.id,
-    receivingAccountId: accounts.receivingAccount.id,
+    receivingAccountId: accounts.receivingAccounts[0].id,
+    secondReceivingAccountId: accounts.receivingAccounts[1].id,
     userId: signedIn.data.user.id,
   };
 }
@@ -160,9 +170,13 @@ describe.skipIf(!runLocal)("local reimbursement ledger", () => {
     });
     expect(original.error).toBeNull();
 
-    const amounts = [20.1, 17.2, 13.3];
+    const reimbursementsInput = [
+      { amount: 20.1, accountId: userA.receivingAccountId },
+      { amount: 17.2, accountId: userA.secondReceivingAccountId },
+      { amount: 13.3, accountId: userA.receivingAccountId },
+    ];
     const reimbursementIds = await Promise.all(
-      amounts.map(async (amount, index) => {
+      reimbursementsInput.map(async ({ accountId, amount }, index) => {
         const idempotencyKey = randomUUID();
         const result = await createReimbursementWithResult(
           {
@@ -171,7 +185,7 @@ describe.skipIf(!runLocal)("local reimbursement ledger", () => {
             description: `Synthetic reimbursement ${index + 1}`,
             idempotencyKey,
             originalTransactionId: originalId,
-            paymentMethod: userA.receivingAccountId,
+            paymentMethod: accountId,
           },
           userA.context,
         );
@@ -210,6 +224,22 @@ describe.skipIf(!runLocal)("local reimbursement ledger", () => {
     ]);
     expect(replays.every((result) => result.replayed)).toBe(true);
 
+    await expect(
+      createReimbursementWithResult(
+        {
+          amount: 20.11,
+          date: transactionDate,
+          description: "Conflicting synthetic reimbursement",
+          idempotencyKey: replayKey,
+          originalTransactionId: originalId,
+          paymentMethod: userA.receivingAccountId,
+        },
+        userA.context,
+      ),
+    ).rejects.toThrow(
+      "idempotency key was already used for a different reimbursement",
+    );
+
     const rows = await userA.client
       .from("transactions")
       .select(
@@ -228,17 +258,44 @@ describe.skipIf(!runLocal)("local reimbursement ledger", () => {
     expect(reimbursements).toHaveLength(3);
     expect(reimbursed).toBeCloseTo(50.6, 2);
     expect(83.4 - reimbursed).toBeCloseTo(32.8, 2);
-    expect(
-      reimbursements.every(
-        (row) => row.payment_method_id === userA.receivingAccountId,
-      ),
-    ).toBe(true);
+    expect(new Set(reimbursements.map((row) => row.payment_method_id))).toEqual(
+      new Set([userA.receivingAccountId, userA.secondReceivingAccountId]),
+    );
     expect(0 - (83.4 - reimbursed)).toBeCloseTo(50.6 - 83.4, 2);
     const totalSaved = await userA.client.rpc("calculate_total_saved", {
       p_selected_month: selectedMonthDate,
     });
     expect(totalSaved.error).toBeNull();
     expect(Number(totalSaved.data)).toBeCloseTo(-32.8, 2);
+
+    await updateTransaction(
+      {
+        amount: 20,
+        category: "none",
+        date: transactionDate,
+        description: "Edited synthetic reimbursement",
+        id: reimbursementIds[0],
+        paymentMethod: userA.receivingAccountId,
+        type: "income",
+      },
+      userA.context,
+    );
+    await updateTransaction(
+      {
+        amount: 20.1,
+        category: "none",
+        date: transactionDate,
+        description: "Synthetic reimbursement 1",
+        id: reimbursementIds[0],
+        paymentMethod: userA.receivingAccountId,
+        type: "income",
+      },
+      userA.context,
+    );
+    await deleteTransaction(reimbursementIds[0], userA.context);
+    await deleteTransaction(reimbursementIds[0], userA.context);
+    await restoreTransaction(reimbursementIds[0], userA.context);
+    await restoreTransaction(reimbursementIds[0], userA.context);
 
     await expect(
       createReimbursementWithResult(

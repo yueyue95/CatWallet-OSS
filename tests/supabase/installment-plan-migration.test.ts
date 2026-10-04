@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -131,6 +131,31 @@ describe("installment group lifecycle migration", () => {
       "use installment group lifecycle operations",
     );
     expect(lifecycleSql).not.toContain("security definer");
+  });
+
+  it("keeps linked transactions in the same reversible lifecycle", () => {
+    const migration = readdirSync("supabase/migrations").find((file) =>
+      file.endsWith("_cw19_installment_transaction_lifecycle.sql"),
+    );
+    expect(migration).toBeTruthy();
+    const transactionLifecycleSql = readFileSync(
+      `supabase/migrations/${migration}`,
+      "utf8",
+    )
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+
+    expect(transactionLifecycleSql).toContain(
+      "update public.transactions as transaction set deleted_at = v_deleted_at",
+    );
+    expect(transactionLifecycleSql).toContain(
+      "update public.transactions as transaction set deleted_at = null",
+    );
+    expect(transactionLifecycleSql).toContain(
+      "transaction.id = occurrence.transaction_id",
+    );
+    expect(transactionLifecycleSql).not.toContain("security definer");
   });
 });
 

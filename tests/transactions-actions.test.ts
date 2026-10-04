@@ -195,8 +195,8 @@ describe("linked ledger actions", () => {
   it("delegates an owner-linked reimbursement", async () => {
     await expect(
       createReimbursementAction({
-        amount: 11.2,
-        date: "2026-09-30",
+        amount: 18.25,
+        date: "2030-04-14",
         description: "Synthetic reimbursement",
         idempotencyKey: uuid,
         originalTransactionId: uuid,

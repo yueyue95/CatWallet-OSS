@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { InstallmentsScreen } from "@/components/catwallet/installments-screen";
 import zhCNMessages from "@/lib/i18n/zh-CN";
@@ -73,6 +74,7 @@ describe("installment retirement editor", () => {
   });
 
   it("previews and deletes a completed installment group", async () => {
+    const user = userEvent.setup();
     const preview = vi.fn().mockResolvedValue({
       blockers: [],
       canDelete: true,
@@ -80,7 +82,6 @@ describe("installment retirement editor", () => {
       planId: item.groupId,
     });
     const remove = vi.fn().mockResolvedValue(undefined);
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <InstallmentsScreen
         categories={[]}
@@ -93,13 +94,50 @@ describe("installment retirement editor", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "删除分期组" }));
+    await user.click(screen.getByRole("button", { name: "管理分期" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除分期" }));
     await act(async () => {});
     expect(preview).toHaveBeenCalledWith({ planId: item.groupId });
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent("分期测试");
+    expect(screen.getByRole("dialog")).toHaveTextContent("2");
+    expect(screen.getByRole("dialog")).toHaveTextContent("关联交易");
+    expect(screen.getByRole("dialog")).toHaveTextContent("当前卡债");
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    await act(async () => {});
     expect(remove).toHaveBeenCalledWith({ planId: item.groupId });
   });
 
+  it("cancels the preview without deleting the installment group", async () => {
+    const user = userEvent.setup();
+    const preview = vi.fn().mockResolvedValue({
+      blockers: [],
+      canDelete: true,
+      occurrenceCount: 2,
+      planId: item.groupId,
+    });
+    const remove = vi.fn();
+    render(
+      <InstallmentsScreen
+        categories={[]}
+        deleteInstallmentAction={remove}
+        items={[{ ...item, retired: true }]}
+        previewDeleteInstallmentAction={preview}
+        restoreInstallmentAction={vi.fn()}
+        saveAllocationAction={vi.fn()}
+        sinkingFunds={[]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "管理分期" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除分期" }));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("restores an archived installment group without opening its editor", async () => {
+    const user = userEvent.setup();
     const restore = vi.fn().mockResolvedValue(undefined);
     render(
       <InstallmentsScreen
@@ -116,7 +154,10 @@ describe("installment retirement editor", () => {
     expect(
       screen.queryByRole("button", { name: "设置退休去向" }),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "恢复分期组" }));
+    await user.click(screen.getByRole("button", { name: "管理分期" }));
+    await user.click(screen.getByRole("menuitem", { name: "恢复分期" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("分期测试");
+    fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
     await act(async () => {});
     expect(restore).toHaveBeenCalledWith({ planId: item.groupId });
   });

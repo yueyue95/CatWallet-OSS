@@ -143,7 +143,7 @@ describe("linked ledger panels", () => {
     expect(restoreAction).toHaveBeenCalledOnce();
   });
 
-  it("links a reimbursement to an expense and receiving account", async () => {
+  it("searches an expense, explains the remaining amount, and records a reimbursement", async () => {
     const user = userEvent.setup();
     const createAction = vi
       .fn()
@@ -151,7 +151,7 @@ describe("linked ledger panels", () => {
     const expense: Transaction = {
       amount: -83.4,
       categoryKey: "Meals",
-      date: "2026-09-30",
+      date: "2026-04-14",
       descriptionKey: "Shared order",
       group: "needs",
       icon: "meal",
@@ -164,11 +164,89 @@ describe("linked ledger panels", () => {
       { ...expense, id: "invoice", isCreditCardInvoice: true },
       { ...expense, id: "income", type: "income" },
     ];
+    const existingReimbursement: Transaction = {
+      ...expense,
+      amount: 18.25,
+      entryKind: "reimbursement",
+      id: "existing-reimbursement",
+      paymentMethodId: "destination",
+      relatedTransactionId: "expense",
+      type: "income",
+    };
+    expense.paymentMethodKey = "Demo credit card";
     render(
       <ReimbursementDialog
         createAction={createAction}
         paymentMethods={paymentMethods}
-        transactions={[expense, ...excluded]}
+        transactions={[expense, existingReimbursement, ...excluded]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "reimbursements.add" }),
+    );
+    await user.type(
+      screen.getByLabelText("reimbursements.searchExpense"),
+      "2026-04-14 Shared order",
+    );
+    const selects = screen.getAllByRole("combobox");
+    fireEvent.change(selects[0], { target: { value: "expense" } });
+    fireEvent.change(selects[1], { target: { value: "destination" } });
+    await user.type(screen.getByLabelText("transaction.amount"), "40.25");
+    fireEvent.change(screen.getByLabelText("transaction.date"), {
+      target: { value: "2026-04-15" },
+    });
+    await user.type(
+      screen.getByLabelText("reimbursements.payer"),
+      "Demo participant",
+    );
+    await user.type(
+      screen.getByLabelText("transaction.notes"),
+      "Synthetic partial reimbursement",
+    );
+
+    expect(screen.getByText("RM83.40")).toBeInTheDocument();
+    expect(screen.getByText("RM18.25")).toBeInTheDocument();
+    expect(screen.getByText("RM65.15")).toBeInTheDocument();
+    expect(screen.getByText("Demo credit card")).toBeInTheDocument();
+    expect(screen.getByText("reimbursements.impactTitle")).toBeInTheDocument();
+    expect(
+      screen.getByText("reimbursements.noOrdinaryIncome"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() =>
+      expect(createAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 40.25,
+          date: "2026-04-15",
+          description: "Demo participant",
+          notes: "Synthetic partial reimbursement",
+          originalTransactionId: "expense",
+          paymentMethod: "destination",
+        }),
+      ),
+    );
+  });
+
+  it("blocks a reimbursement above the selected expense's remaining amount", async () => {
+    const user = userEvent.setup();
+    const createAction = vi.fn();
+    const expense: Transaction = {
+      amount: -28.75,
+      categoryKey: "Meals",
+      date: "2026-04-14",
+      descriptionKey: "Demo shared meal",
+      group: "needs",
+      icon: "meal",
+      id: "expense",
+      type: "expense",
+    };
+    render(
+      <ReimbursementDialog
+        createAction={createAction}
+        paymentMethods={paymentMethods}
+        transactions={[expense]}
       />,
     );
 
@@ -178,21 +256,12 @@ describe("linked ledger panels", () => {
     const selects = screen.getAllByRole("combobox");
     fireEvent.change(selects[0], { target: { value: "expense" } });
     fireEvent.change(selects[1], { target: { value: "destination" } });
-    await user.type(screen.getByLabelText("transaction.amount"), "50.60");
-    fireEvent.change(screen.getByLabelText("transaction.date"), {
-      target: { value: "2026-10-01" },
-    });
+    await user.type(screen.getByLabelText("transaction.amount"), "28.76");
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
-    await waitFor(() =>
-      expect(createAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          amount: 50.6,
-          date: "2026-10-01",
-          originalTransactionId: "expense",
-          paymentMethod: "destination",
-        }),
-      ),
+    expect(createAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "reimbursements.exceedsRemaining",
     );
   });
 });

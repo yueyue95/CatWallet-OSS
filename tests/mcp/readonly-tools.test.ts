@@ -241,6 +241,27 @@ describe("CatWallet read-only MCP tools", () => {
     expect(
       result.tools.every((tool) => !tool.inputSchema.properties?.userId),
     ).toBe(true);
+
+    const capabilityResult = await client.callTool({
+      name: "get_capabilities",
+      arguments: {},
+    });
+    const capabilities = responseData(capabilityResult) as {
+      reads: Array<{ name: string }>;
+      writes: Array<{ name: string }>;
+    };
+    expect(
+      new Set([
+        ...capabilities.reads.map(({ name }) => name),
+        ...capabilities.writes.map(({ name }) => name),
+      ]),
+    ).toEqual(
+      new Set(
+        result.tools
+          .map((tool) => tool.name)
+          .filter((name) => name !== "get_capabilities"),
+      ),
+    );
     expect(
       result.tools.find((tool) => tool.name === "create_transaction"),
     ).toMatchObject({

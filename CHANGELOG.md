@@ -21,6 +21,25 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Simplified Chinese now covers the primary payment-account, transaction-history, installment, category, goal, report, settings, dialog, empty-state, validation, and toast copy.
 - Payment terminology is standardized as 支付账户, 信用卡账单, 结账日, and 到期还款日 throughout zh-CN.
 
+## [v0.3.0] - 2026-10-04
+
+### Added
+
+- First-class reimbursement entry from the transaction UI, including original-expense search, receiving-account selection, partial and multi-party repayment support, and impact previews.
+- Installment group deletion previews, atomic soft deletion and restoration, and an archived-plan view in the web UI and MCP capability catalog.
+- Planned installment occurrences in safe-to-spend reserves without recognizing future plans as current spending or card liability.
+
+### Changed
+
+- Reimbursements preserve gross expenses and receiving-account cash flow while remaining excluded from ordinary income; reports use the personal share after reimbursement.
+- Posted installment transactions now follow their plan and occurrences through group deletion and restoration.
+- Deleted installment histories retain their actual final occurrence date and remain hidden from the default active-plan view.
+
+### Security
+
+- Installment lifecycle operations remain owner-scoped, idempotent, and protected against unsafe active-plan or cross-user operations.
+- Limited release exception: full audit reports 1 High / 0 Critical for GHSA-vfj7-8cjw-p6xm (CVE-2026-93687); production-only audit reports 0 vulnerabilities. The sole affected path is `eslint-config-next -> @next/eslint-plugin-next -> fast-glob -> micromatch -> braces@3.0.3`, exclusively in the ESLint development toolchain and absent from the application runtime. Upstream currently has no formally published fix. No audit suppression or dependency override is added. Follow-up: [security issue #1](https://github.com/yueyue95/CatWallet-OSS/issues/1).
+
 ## [v0.1.0] - 2026-05-08
 
 ### Added
