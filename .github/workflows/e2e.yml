@@ -68,9 +68,13 @@ jobs:
       - name: Run local password-reset integration suite
         shell: bash
         run: |
-          pnpm run dev --hostname 127.0.0.1 --port 3000 > /tmp/catwallet-next.log 2>&1 &
+          ./node_modules/.bin/next dev --hostname 127.0.0.1 --port 3000 > /tmp/catwallet-next.log 2>&1 &
           APP_PID=$!
-          trap 'kill "$APP_PID" 2>/dev/null || true' EXIT
+          cleanup() {
+            kill "$APP_PID" 2>/dev/null || true
+            wait "$APP_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           for attempt in {1..120}; do
             if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then
               break
@@ -83,6 +87,8 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:3000/ > /dev/null
           pnpm run test:integration:password-reset
+          cleanup
+          trap - EXIT
 
       - name: Run Playwright E2E suite
         run: pnpm run e2e
