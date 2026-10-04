@@ -1,14 +1,17 @@
 import { redirect } from "next/navigation";
 import { TransactionForm } from "@/components/dashboard/transaction-form";
+import { ReimbursementDialog } from "@/components/dashboard/reimbursement-dialog";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { createClient } from "@/lib/supabase/server";
 import {
   createCategoryAction,
+  createReimbursementAction,
   createTransactionAction,
 } from "@/app/transactions/actions";
 import {
   getTransactionFormOptions,
   getUserContext,
+  listTransactions,
 } from "@/lib/finance/transactions";
 import { getCoolingItem } from "@/lib/finance/cooling";
 import { listFixedCommitments } from "@/lib/finance/catwallet";
@@ -29,6 +32,18 @@ function resolveCoolingItemId(value: string | string[] | undefined) {
     : undefined;
 }
 
+async function getNewTransactionPageData(
+  userContext: Awaited<ReturnType<typeof getUserContext>>,
+  coolingItemId: string | undefined,
+) {
+  return Promise.all([
+    getTransactionFormOptions({ userContext }),
+    coolingItemId ? getCoolingItem(coolingItemId, userContext) : null,
+    listFixedCommitments(userContext),
+    listTransactions({ includePrevious: true, userContext }),
+  ]);
+}
+
 export default async function NewTransactionPage({
   searchParams,
 }: NewTransactionPageProps) {
@@ -42,14 +57,18 @@ export default async function NewTransactionPage({
   const userContext = await getUserContext(supabase);
   const resolvedSearchParams = await searchParams;
   const coolingItemId = resolveCoolingItemId(resolvedSearchParams?.coolingItem);
-  const [formOptions, coolingItem, fixedCommitments] = await Promise.all([
-    getTransactionFormOptions({ userContext }),
-    coolingItemId ? getCoolingItem(coolingItemId, userContext) : null,
-    listFixedCommitments(userContext),
-  ]);
+  const [formOptions, coolingItem, fixedCommitments, transactions] =
+    await getNewTransactionPageData(userContext, coolingItemId);
 
   return (
     <AppShell userContext={userContext}>
+      <div className="mb-4 flex justify-end">
+        <ReimbursementDialog
+          createAction={createReimbursementAction}
+          paymentMethods={formOptions.paymentMethods}
+          transactions={transactions}
+        />
+      </div>
       <TransactionForm
         categories={formOptions.categories}
         coolingItem={

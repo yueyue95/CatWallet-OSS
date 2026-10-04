@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { getInstallmentOverview } from "@/lib/finance/catwallet";
 import type { Database } from "@/lib/supabase/database.types";
 
 const runLocal =
@@ -255,6 +256,75 @@ describe.skipIf(!runLocal)("local installment plan model", () => {
     expect(
       restoredOccurrences.data?.every((row) => row.deleted_at === null),
     ).toBe(true);
+  });
+
+  it("soft-deletes and restores the posted transaction with its completed plan", async () => {
+    const planId = randomUUID();
+    const transactionId = randomUUID();
+    const transaction = await userA.client.from("transactions").insert({
+      amount: 125,
+      category_id: userA.categoryId,
+      date: "2026-09-30",
+      description: "encrypted synthetic posted installment",
+      installment_group_id: planId,
+      installment_number: 10,
+      installment_total: 12,
+      kind: "expense",
+      payment_method_id: userA.paymentMethodId,
+      id: transactionId,
+    });
+    expect(transaction.error).toBeNull();
+
+    const plan = await userA.client.from("installment_plans").insert({
+      ...planRow(userA, randomUUID()),
+      completed_at: new Date().toISOString(),
+      id: planId,
+      status: "completed",
+    });
+    expect(plan.error).toBeNull();
+    const occurrence = await userA.client
+      .from("installment_occurrences")
+      .insert({
+        amount: 125,
+        due_date: "2026-09-30",
+        installment_number: 10,
+        plan_id: planId,
+        status: "posted",
+        transaction_id: transactionId,
+      });
+    expect(occurrence.error).toBeNull();
+
+    expect(
+      (await userA.client.rpc("delete_installment", { p_plan_id: planId }))
+        .error,
+    ).toBeNull();
+    const deletedOverview = await getInstallmentOverview(
+      { supabase: userA.client, userId: userA.userId },
+      { includeDeleted: true },
+    );
+    expect(
+      deletedOverview.find((item) => item.groupId === planId),
+    ).toMatchObject({
+      archivedAt: expect.any(String),
+      endDate: "2026-09-30",
+    });
+    const deletedTransaction = await userA.client
+      .from("transactions")
+      .select("deleted_at")
+      .eq("id", transactionId)
+      .single();
+    expect(deletedTransaction.data?.deleted_at).not.toBeNull();
+
+    expect(
+      (await userA.client.rpc("restore_installment", { p_plan_id: planId }))
+        .error,
+    ).toBeNull();
+    const restoredTransaction = await userA.client
+      .from("transactions")
+      .select("deleted_at")
+      .eq("id", transactionId)
+      .single();
+    expect(restoredTransaction.data?.deleted_at).toBeNull();
   });
 
   it("blocks active plans and cross-owner group operations", async () => {

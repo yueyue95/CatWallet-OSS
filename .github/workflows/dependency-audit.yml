@@ -44,4 +44,4 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
-        run: pnpm run security:audit
+        run: pnpm run security:audit:release

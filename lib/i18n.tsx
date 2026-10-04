@@ -164,6 +164,24 @@ const messages = {
     "installments.lifecycleError":
       "Unable to change this installment plan. Review its linked records.",
     "installments.restore": "Restore installment group",
+    "installments.manage": "Manage installment",
+    "installments.showActive": "Show active installments",
+    "installments.showDeleted": "Show deleted installments",
+    "installments.deletedStatus": "Deleted by user",
+    "installments.retiredStatus": "Completed",
+    "installments.deleteTitle": "Delete installment group?",
+    "installments.restoreTitle": "Restore installment group?",
+    "installments.confirmDelete": "Confirm delete",
+    "installments.confirmRestore": "Confirm restore",
+    "installments.affectedPlan": "Plan",
+    "installments.affectedOccurrences": "Occurrences",
+    "installments.affectedTransactions": "Linked transactions",
+    "installments.linkedTransactionsFollow": "Handled with the group",
+    "installments.financialImpact": "Expected financial impact",
+    "installments.deleteImpact":
+      "The group will stop affecting current liabilities, reports, and safe-to-spend. No row is physically deleted.",
+    "installments.restoreImpact":
+      "The plan, occurrences, and eligible linked transactions will return together.",
     "common.close": "Close",
     "common.required": "Required",
     "common.category": "Category",
@@ -747,7 +765,27 @@ const messages = {
     "reimbursements.description":
       "Link money returned by another person to the original expense. It will not count as ordinary income.",
     "reimbursements.originalExpense": "Original expense",
+    "reimbursements.searchExpense":
+      "Find by date, merchant, amount, or account",
     "reimbursements.receivingAccount": "Receiving account",
+    "reimbursements.payer": "Payer or source (optional)",
+    "reimbursements.grossExpense": "Original gross expense",
+    "reimbursements.reimbursed": "Reimbursements received",
+    "reimbursements.remaining": "Still available to link",
+    "reimbursements.originalAccount": "Original payment account",
+    "reimbursements.purchaseDate": "Purchase date",
+    "reimbursements.impactTitle": "Impact preview",
+    "reimbursements.grossUnchanged":
+      "The original gross expense stays unchanged.",
+    "reimbursements.reimbursementIncrease":
+      "Reimbursed expense increases by {amount}.",
+    "reimbursements.personalExpenseDecrease":
+      "Personal expense decreases by {amount}.",
+    "reimbursements.noOrdinaryIncome": "Ordinary income does not increase.",
+    "reimbursements.accountIncrease": "{account} increases by {amount}.",
+    "reimbursements.exceedsRemaining":
+      "This reimbursement exceeds the amount still available on the original expense.",
+    "reimbursements.label": "Reimbursement",
     "reimbursements.defaultDescription": "Expense reimbursement",
     "reimbursements.invalid":
       "Choose an expense, receiving account, and valid amount.",
@@ -1587,7 +1625,26 @@ const messages = {
     "reimbursements.description":
       "Vincule o valor devolvido por outra pessoa à despesa original. Ele não será contado como receita comum.",
     "reimbursements.originalExpense": "Despesa original",
+    "reimbursements.searchExpense":
+      "Buscar por data, estabelecimento, valor ou conta",
     "reimbursements.receivingAccount": "Conta de recebimento",
+    "reimbursements.payer": "Pagador ou origem (opcional)",
+    "reimbursements.grossExpense": "Despesa bruta original",
+    "reimbursements.reimbursed": "Reembolsos recebidos",
+    "reimbursements.remaining": "Valor ainda disponível",
+    "reimbursements.originalAccount": "Conta de pagamento original",
+    "reimbursements.purchaseDate": "Data da compra",
+    "reimbursements.impactTitle": "Prévia do impacto",
+    "reimbursements.grossUnchanged": "A despesa bruta original não muda.",
+    "reimbursements.reimbursementIncrease":
+      "O valor reembolsado aumenta em {amount}.",
+    "reimbursements.personalExpenseDecrease":
+      "A despesa pessoal diminui em {amount}.",
+    "reimbursements.noOrdinaryIncome": "A receita comum não aumenta.",
+    "reimbursements.accountIncrease": "{account} aumenta em {amount}.",
+    "reimbursements.exceedsRemaining":
+      "Este reembolso excede o valor disponível da despesa original.",
+    "reimbursements.label": "Reembolso",
     "reimbursements.defaultDescription": "Reembolso de despesa",
     "reimbursements.invalid":
       "Escolha uma despesa, uma conta e um valor válido.",

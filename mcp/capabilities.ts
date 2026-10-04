@@ -1,8 +1,14 @@
 export type McpCapabilityStatus = "available" | "planned" | "restricted";
 
 export type McpCapability = {
+  appliesTo?: string[];
+  confirmationRequired?: boolean;
   idempotencyRequired?: boolean;
   name: string;
+  previewRequired?: boolean;
+  purpose?: string;
+  reversible?: boolean;
+  scope?: "installment_group";
   status: McpCapabilityStatus;
   write: boolean;
 };
@@ -14,7 +20,14 @@ const capabilities: McpCapability[] = [
   { name: "get_safe_to_spend", status: "available", write: false },
   { name: "list_categories", status: "available", write: false },
   { name: "list_payment_accounts", status: "available", write: false },
-  { name: "list_transactions", status: "available", write: false },
+  {
+    appliesTo: ["purchase", "repayment", "refund", "reimbursement", "transfer"],
+    name: "list_transactions",
+    purpose:
+      "Read owner-scoped ledger entries, including linked reimbursements.",
+    status: "available",
+    write: false,
+  },
   { name: "list_installments", status: "available", write: false },
   { name: "get_installment_summary", status: "available", write: false },
   { name: "list_sinking_funds", status: "available", write: false },
@@ -24,6 +37,15 @@ const capabilities: McpCapability[] = [
   { name: "get_monthly_report", status: "available", write: false },
   { name: "list_cooling_items", status: "available", write: false },
   { name: "get_account_balances", status: "available", write: false },
+  {
+    name: "preview_delete_installment",
+    previewRequired: false,
+    purpose:
+      "Preview blockers and affected occurrences before changing one complete installment group.",
+    scope: "installment_group",
+    status: "available",
+    write: false,
+  },
   { name: "preview_transaction_import", status: "available", write: false },
   { name: "preview_account_transfer", status: "available", write: false },
   {
@@ -51,8 +73,11 @@ const capabilities: McpCapability[] = [
     write: true,
   },
   {
+    appliesTo: ["reimbursement"],
     idempotencyRequired: true,
     name: "create_reimbursement",
+    purpose:
+      "Create an owner-scoped contra-expense receipt linked to an original expense.",
     status: "available",
     write: true,
   },
@@ -93,20 +118,31 @@ const capabilities: McpCapability[] = [
     write: true,
   },
   {
+    appliesTo: ["purchase", "repayment", "refund", "reimbursement"],
     idempotencyRequired: true,
     name: "update_transaction",
+    purpose:
+      "Edit an owner-scoped ledger entry while preserving its reimbursement linkage and validation.",
     status: "available",
     write: true,
   },
   {
+    appliesTo: ["purchase", "repayment", "refund", "reimbursement"],
     idempotencyRequired: true,
     name: "delete_transaction",
+    purpose:
+      "Soft-delete an owner-scoped ledger entry, including a reimbursement.",
+    reversible: true,
     status: "available",
     write: true,
   },
   {
+    appliesTo: ["purchase", "repayment", "refund", "reimbursement"],
     idempotencyRequired: true,
     name: "restore_transaction",
+    purpose:
+      "Restore an owner-scoped soft-deleted ledger entry, including a reimbursement.",
+    reversible: true,
     status: "available",
     write: true,
   },
@@ -179,6 +215,29 @@ const capabilities: McpCapability[] = [
   {
     idempotencyRequired: true,
     name: "complete_installment",
+    status: "available",
+    write: true,
+  },
+  {
+    confirmationRequired: true,
+    idempotencyRequired: true,
+    name: "delete_installment",
+    previewRequired: true,
+    purpose:
+      "Soft-delete one eligible installment group, its occurrences, and linked posted transactions atomically.",
+    reversible: true,
+    scope: "installment_group",
+    status: "available",
+    write: true,
+  },
+  {
+    confirmationRequired: true,
+    idempotencyRequired: true,
+    name: "restore_installment",
+    purpose:
+      "Restore one owned soft-deleted installment group, its occurrences, and eligible linked transactions atomically.",
+    reversible: true,
+    scope: "installment_group",
     status: "available",
     write: true,
   },

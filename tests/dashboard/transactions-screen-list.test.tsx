@@ -39,6 +39,7 @@ const translations: Record<string, string> = {
   "data.group.wants": "Wants",
   "data.group.savings": "Savings",
   "data.group.income": "Income",
+  "data.category.receipts": "Income",
   "dashboard.summary.totalIncome": "Total Income",
   "dashboard.summary.totalExpenses": "Total Expenses",
   "dashboard.summary.totalSaved": "Total Saved",
@@ -53,6 +54,7 @@ const translations: Record<string, string> = {
   "screen.transactions.hideNextInvoice": "Hide next invoice",
   "screen.transactions.showPrevious": "Show previous",
   "screen.transactions.hidePrevious": "Hide previous",
+  "reimbursements.label": "Reimbursement",
 };
 
 vi.mock("@/lib/i18n", () => ({
@@ -246,6 +248,27 @@ describe("TransactionsScreen list rendering", () => {
 
     expect(screen.getByText("Today")).toBeInTheDocument();
     expect(screen.getByText("Yesterday")).toBeInTheDocument();
+  });
+
+  it("labels reimbursement ledger entries instead of presenting them as ordinary income", () => {
+    renderScreen({
+      transactions: [
+        makeTransaction({
+          amount: 34.6,
+          categoryKey: "data.category.receipts",
+          date: "2026-07-02",
+          descriptionKey: "Colleague repayment",
+          entryKind: "reimbursement",
+          group: "income",
+          id: "reimbursement",
+          relatedTransactionId: "original-expense",
+          type: "income",
+        }),
+      ],
+    });
+
+    expect(screen.getByText("Reimbursement")).toBeInTheDocument();
+    expect(screen.queryByText("Income")).not.toBeInTheDocument();
   });
 
   it("filters by search text and clears via the inline clear button", async () => {

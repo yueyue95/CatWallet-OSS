@@ -30,6 +30,7 @@
     "demo:reset": "tsx scripts/demo/reset.ts",
     "demo:screenshots": "pnpm run demo:reset && tsx scripts/demo/screenshots.ts",
     "security:audit": "pnpm audit --audit-level=moderate",
+    "security:audit:release": "node scripts/verify-release-audit.mjs",
     "security:trivy": "trivy fs --scanners vuln,secret,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .",
     "prepare": "husky",
     "update": "pnpm update",

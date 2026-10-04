@@ -31,6 +31,8 @@ describe("CatWallet Butler capability contracts", () => {
         "delete_account_transfer",
         "restore_account_transfer",
         "create_reimbursement",
+        "delete_installment",
+        "restore_installment",
         "create_payment_account",
         "update_payment_account",
         "set_opening_balance",
@@ -76,6 +78,47 @@ describe("CatWallet Butler capability contracts", () => {
     expect(capabilities.restricted.map((item) => item.name)).toContain(
       "password_or_auth_mutation",
     );
+    expect(capabilities.reads).toContainEqual(
+      expect.objectContaining({
+        name: "preview_delete_installment",
+        previewRequired: false,
+        scope: "installment_group",
+        write: false,
+      }),
+    );
+    expect(capabilities.writes).toContainEqual(
+      expect.objectContaining({
+        confirmationRequired: true,
+        name: "delete_installment",
+        previewRequired: true,
+        reversible: true,
+        scope: "installment_group",
+        write: true,
+      }),
+    );
+    expect(capabilities.writes).toContainEqual(
+      expect.objectContaining({
+        confirmationRequired: true,
+        name: "restore_installment",
+        reversible: true,
+        scope: "installment_group",
+        write: true,
+      }),
+    );
+
+    for (const capabilityName of [
+      "list_transactions",
+      "create_reimbursement",
+      "update_transaction",
+      "delete_transaction",
+      "restore_transaction",
+    ]) {
+      const capability = [...capabilities.reads, ...capabilities.writes].find(
+        (item) => item.name === capabilityName,
+      );
+      expect(capability?.appliesTo).toContain("reimbursement");
+      expect(capability?.purpose).toBeTruthy();
+    }
   });
 
   it("accepts explicit account/installment/budget inputs and rejects user selectors", () => {

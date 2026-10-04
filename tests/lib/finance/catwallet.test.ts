@@ -33,6 +33,17 @@ vi.mock("@/lib/finance/transactions", () => ({
 type Scenario = {
   balances: AccountBalance[];
   budgetIncome?: number | null;
+  fixedCommitments?: unknown[];
+  installmentOccurrences?: Array<{
+    amount: number;
+    due_date: string;
+    plan_id: string;
+    status: "planned" | "posted";
+  }>;
+  installmentPlans?: Array<{
+    id: string;
+    linked_fixed_commitment_id?: string | null;
+  }>;
   invoices: Array<{
     amount: number;
     date: string;
@@ -69,13 +80,25 @@ function query(data: unknown, single: unknown = null) {
 
 function context(scenario: Scenario): AuthenticatedUserContext {
   const supabase = {
-    from: (table: string) =>
-      query(
-        table === "transactions" ? scenario.transactions : [],
+    from: (table: string) => {
+      let rows: unknown[] = [];
+      if (table === "transactions") rows = scenario.transactions;
+      if (table === "fixed_commitments") {
+        rows = scenario.fixedCommitments ?? [];
+      }
+      if (table === "installment_plans") {
+        rows = scenario.installmentPlans ?? [];
+      }
+      if (table === "installment_occurrences") {
+        rows = scenario.installmentOccurrences ?? [];
+      }
+      return query(
+        rows,
         table === "monthly_budgets" && scenario.budgetIncome !== undefined
           ? { income: scenario.budgetIncome, savings_limit: 0 }
           : null,
-      ),
+      );
+    },
   };
   return {
     scenario,
@@ -448,6 +471,58 @@ describe("getCatWalletDashboardData credit card accounting", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("reserves planned modeled installments after their fixed commitments are disabled", async () => {
+    const result = await getCatWalletDashboardData(
+      "2026-10",
+      context({
+        balances: [],
+        fixedCommitments: [
+          {
+            amount: 500,
+            cadence: "monthly",
+            categories: null,
+            category_id: null,
+            custom_interval_months: null,
+            deleted_at: null,
+            end_date: null,
+            id: "commitment-i",
+            include_in_safe_to_spend: true,
+            is_enabled: true,
+            name: "Plan I reserve",
+            payment_method_id: null,
+            payment_methods: null,
+            start_date: "2026-10-01",
+          },
+        ],
+        installmentOccurrences: [
+          {
+            amount: 125,
+            due_date: "2026-10-29",
+            plan_id: "plan-g",
+            status: "planned",
+          },
+          {
+            amount: 500,
+            due_date: "2026-10-29",
+            plan_id: "plan-i",
+            status: "planned",
+          },
+        ],
+        installmentPlans: [
+          { id: "plan-g" },
+          { id: "plan-i", linked_fixed_commitment_id: "commitment-i" },
+        ],
+        invoices: [],
+        transactions: [],
+      }),
+    );
+
+    expect(result.safeToSpend).toMatchObject({
+      fixedCommitments: 625,
+      safeToSpend: -625,
+    });
   });
 
   it("distinguishes an explicitly configured zero available income from no monthly amount", async () => {

@@ -523,7 +523,7 @@ describe("createReimbursementWithResult", () => {
 
     await expect(
       createReimbursementWithResult({
-        amount: 11.2,
+        amount: 18.25,
         date: "2030-01-15",
         description: "Synthetic reimbursement",
         idempotencyKey: TRANSACTION_ID,
@@ -532,7 +532,7 @@ describe("createReimbursementWithResult", () => {
       }),
     ).resolves.toEqual({ replayed: false, transactionId: TRANSACTION_ID });
     expect(supabase.rpc).toHaveBeenCalledWith("create_reimbursement", {
-      p_amount: 11.2,
+      p_amount: 18.25,
       p_date: "2030-01-15",
       p_description: "Synthetic reimbursement",
       p_idempotency_key: TRANSACTION_ID,

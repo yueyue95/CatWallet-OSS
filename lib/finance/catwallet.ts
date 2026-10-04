@@ -783,6 +783,8 @@ export async function getCatWalletDashboardData(
     transactionResult,
     budgetResult,
     invoiceTransactions,
+    installmentPlansResult,
+    installmentOccurrencesResult,
   ] = await Promise.all([
     listAccountBalances(ctx),
     listFixedCommitments(ctx),
@@ -809,6 +811,18 @@ export async function getCatWalletDashboardData(
       useFinancialMonth: false,
       userContext: ctx,
     }),
+    ctx.supabase
+      .from("installment_plans")
+      .select("id, linked_fixed_commitment_id")
+      .eq("user_id", ctx.userId)
+      .is("deleted_at", null),
+    ctx.supabase
+      .from("installment_occurrences")
+      .select("plan_id, amount, due_date, status")
+      .eq("user_id", ctx.userId)
+      .gte("due_date", `${month}-01`)
+      .lt("due_date", `${nextMonth(month)}-01`)
+      .is("deleted_at", null),
   ]);
 
   if (transactionResult.error) {
@@ -819,6 +833,16 @@ export async function getCatWalletDashboardData(
   if (budgetResult.error && budgetResult.error.code !== "PGRST116") {
     throw new Error(
       `Unable to load monthly savings target: ${budgetResult.error.message}`,
+    );
+  }
+  if (installmentPlansResult.error) {
+    throw new Error(
+      `Unable to load installment plans: ${installmentPlansResult.error.message}`,
+    );
+  }
+  if (installmentOccurrencesResult.error) {
+    throw new Error(
+      `Unable to load installment occurrences: ${installmentOccurrencesResult.error.message}`,
     );
   }
 
@@ -878,6 +902,29 @@ export async function getCatWalletDashboardData(
   }
 
   const monthCommitments = getFixedCommitmentsForMonth(commitments, month);
+  const monthCommitmentIds = new Set(
+    monthCommitments.map((commitment) => commitment.id),
+  );
+  const activePlans = new Map(
+    (installmentPlansResult.data ?? []).map((plan) => [
+      plan.id,
+      plan.linked_fixed_commitment_id,
+    ]),
+  );
+  const plannedInstallmentCommitments = (
+    installmentOccurrencesResult.data ?? []
+  )
+    .filter(
+      (occurrence) =>
+        occurrence.status === "planned" &&
+        occurrence.due_date.startsWith(month) &&
+        activePlans.has(occurrence.plan_id) &&
+        !monthCommitmentIds.has(activePlans.get(occurrence.plan_id) ?? ""),
+    )
+    .map((occurrence) => ({
+      amount: Number(occurrence.amount),
+      cadence: "monthly" as const,
+    }));
   const commitmentDetails = monthCommitments.map((commitment) => {
     const monthlyAmount = toMonthlyAmount(
       commitment.amount,
@@ -946,13 +993,16 @@ export async function getCatWalletDashboardData(
     refreshedAt: new Date().toISOString(),
     safeToSpend: calculateSafeToSpend({
       dataQuality,
-      fixedCommitments: monthCommitments.map((commitment) => ({
-        amount: commitment.amount,
-        cadence: commitment.cadence,
-        customIntervalMonths: commitment.customIntervalMonths,
-        includeInSafeToSpend: commitment.includeInSafeToSpend,
-        paidAmount: paidByCommitment.get(commitment.id) ?? 0,
-      })),
+      fixedCommitments: [
+        ...monthCommitments.map((commitment) => ({
+          amount: commitment.amount,
+          cadence: commitment.cadence,
+          customIntervalMonths: commitment.customIntervalMonths,
+          includeInSafeToSpend: commitment.includeInSafeToSpend,
+          paidAmount: paidByCommitment.get(commitment.id) ?? 0,
+        })),
+        ...plannedInstallmentCommitments,
+      ],
       futureReserves,
       income: incomeUsed,
       incomeIsForecast: incomeUsesBudgetFallback,
@@ -1181,6 +1231,14 @@ async function listModeledInstallmentOverview(
   allocations: InstallmentRetirementAllocation[],
   includeDeleted: boolean,
 ) {
+  let occurrenceQuery = ctx.supabase
+    .from("installment_occurrences")
+    .select("plan_id, installment_number, amount, due_date, status")
+    .eq("user_id", ctx.userId)
+    .order("installment_number");
+  if (!includeDeleted) {
+    occurrenceQuery = occurrenceQuery.is("deleted_at", null);
+  }
   const [plans, occurrences] = await Promise.all([
     ctx.supabase
       .from("installment_plans")
@@ -1188,12 +1246,7 @@ async function listModeledInstallmentOverview(
         "id, description, amount_mode, entered_amount, installment_amount, total_amount, current_installment, total_installments, status, deleted_at",
       )
       .eq("user_id", ctx.userId),
-    ctx.supabase
-      .from("installment_occurrences")
-      .select("plan_id, installment_number, amount, due_date, status")
-      .eq("user_id", ctx.userId)
-      .is("deleted_at", null)
-      .order("installment_number"),
+    occurrenceQuery,
   ]);
   if (plans.error)
     throw new Error(`Unable to load installment plans: ${plans.error.message}`);

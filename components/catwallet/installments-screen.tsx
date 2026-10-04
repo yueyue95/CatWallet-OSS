@@ -2,9 +2,25 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/dashboard/page-header";
 import { useI18n } from "@/lib/i18n";
 import type {
@@ -28,6 +44,7 @@ type Props = {
     data: SaveInstallmentRetirementInput,
   ) => Promise<InstallmentRetirementAllocation[]>;
   sinkingFunds: SinkingFund[];
+  view?: "active" | "deleted";
 };
 type Draft = {
   key: number;
@@ -260,33 +277,53 @@ function Editor({
   );
 }
 
+type InstallmentOperation = "delete" | "restore" | null;
+
+async function applyInstallmentLifecycle(
+  props: Props,
+  planId: string,
+  operation: InstallmentOperation,
+) {
+  if (operation === "delete") {
+    return props.deleteInstallmentAction({ planId });
+  }
+  if (operation === "restore") {
+    return props.restoreInstallmentAction({ planId });
+  }
+}
+
 function useInstallmentLifecycle(props: Props, item: InstallmentOverviewItem) {
   const { t } = useI18n();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  async function remove() {
+  const [operation, setOperation] = useState<InstallmentOperation>(null);
+  const [preview, setPreview] = useState<InstallmentDeletePreview | null>(null);
+  async function requestDelete() {
     setPending(true);
     setError(null);
     try {
-      const preview = await props.previewDeleteInstallmentAction({
+      const result = await props.previewDeleteInstallmentAction({
         planId: item.groupId,
       });
-      if (!preview.canDelete) return setError(preview.blockers.join(", "));
-      if (!window.confirm(t("installments.deleteConfirm"))) return;
-      await props.deleteInstallmentAction({ planId: item.groupId });
-      router.refresh();
+      if (!result.canDelete) return setError(result.blockers.join(", "));
+      setPreview(result);
+      setOperation("delete");
     } catch {
       setError(t("installments.lifecycleError"));
     } finally {
       setPending(false);
     }
   }
-  async function restore() {
+  function requestRestore() {
+    setOperation("restore");
+  }
+  async function confirm() {
     setPending(true);
     setError(null);
     try {
-      await props.restoreInstallmentAction({ planId: item.groupId });
+      await applyInstallmentLifecycle(props, item.groupId, operation);
+      setOperation(null);
       router.refresh();
     } catch {
       setError(t("installments.lifecycleError"));
@@ -294,7 +331,167 @@ function useInstallmentLifecycle(props: Props, item: InstallmentOverviewItem) {
       setPending(false);
     }
   }
-  return { error, pending, remove, restore };
+  return {
+    close: () => setOperation(null),
+    confirm,
+    error,
+    operation,
+    pending,
+    preview,
+    requestDelete,
+    requestRestore,
+  };
+}
+
+type InstallmentLifecycle = ReturnType<typeof useInstallmentLifecycle>;
+
+function InstallmentManageMenu({
+  item,
+  lifecycle,
+  t,
+}: {
+  item: InstallmentOverviewItem;
+  lifecycle: InstallmentLifecycle;
+  t: (key: string) => string;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" disabled={lifecycle.pending}>
+          {t("installments.manage")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {item.archivedAt ? (
+          <DropdownMenuItem onClick={lifecycle.requestRestore}>
+            {t("installments.restore")}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            disabled={!item.retired}
+            onClick={lifecycle.requestDelete}
+          >
+            {t("installments.delete")}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function InstallmentLifecycleSummary({
+  item,
+  occurrenceCount,
+}: {
+  item: InstallmentOverviewItem;
+  occurrenceCount: number;
+}) {
+  const { formatCurrency, t } = useI18n();
+  const rows = [
+    [
+      t("retirement.progress"),
+      `${item.currentInstallment}/${item.totalInstallments}`,
+    ],
+    [
+      t("common.remaining"),
+      `${item.remainingInstallments} · ${formatCurrency(item.remainingAmount)}`,
+    ],
+    [t("installments.affectedPlan"), "1"],
+    [t("installments.affectedOccurrences"), String(occurrenceCount)],
+    [
+      t("installments.affectedTransactions"),
+      t("installments.linkedTransactionsFollow"),
+    ],
+  ];
+  return (
+    <dl className="grid gap-2 rounded-lg border p-3 text-sm sm:grid-cols-2">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function InstallmentLifecycleDialog({
+  item,
+  lifecycle,
+}: {
+  item: InstallmentOverviewItem;
+  lifecycle: InstallmentLifecycle;
+}) {
+  const { t } = useI18n();
+  const restoring = lifecycle.operation === "restore";
+  const occurrenceCount =
+    lifecycle.preview?.occurrenceCount ?? item.totalInstallments;
+  return (
+    <Dialog
+      open={lifecycle.operation !== null}
+      onOpenChange={(open) => !open && lifecycle.close()}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {t(
+              restoring
+                ? "installments.restoreTitle"
+                : "installments.deleteTitle",
+            )}
+          </DialogTitle>
+          <DialogDescription>{item.name}</DialogDescription>
+        </DialogHeader>
+        <InstallmentLifecycleSummary
+          item={item}
+          occurrenceCount={occurrenceCount}
+        />
+        <section className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+          <h3 className="font-medium">{t("installments.financialImpact")}</h3>
+          <p className="mt-1 text-muted-foreground">
+            {t(
+              restoring
+                ? "installments.restoreImpact"
+                : "installments.deleteImpact",
+            )}
+          </p>
+        </section>
+        <InstallmentLifecycleDialogFooter
+          lifecycle={lifecycle}
+          restoring={restoring}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InstallmentLifecycleDialogFooter({
+  lifecycle,
+  restoring,
+}: {
+  lifecycle: InstallmentLifecycle;
+  restoring: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <DialogFooter>
+      <Button type="button" variant="outline" onClick={lifecycle.close}>
+        {t("common.cancel")}
+      </Button>
+      <Button
+        type="button"
+        variant={restoring ? "default" : "destructive"}
+        disabled={lifecycle.pending}
+        onClick={lifecycle.confirm}
+      >
+        {t(
+          restoring
+            ? "installments.confirmRestore"
+            : "installments.confirmDelete",
+        )}
+      </Button>
+    </DialogFooter>
+  );
 }
 
 function InstallmentLifecycleControls(
@@ -303,31 +500,28 @@ function InstallmentLifecycleControls(
   const { item } = props;
   const { t } = useI18n();
   const lifecycle = useInstallmentLifecycle(props, item);
-  let button = null;
-  if (item.archivedAt) {
-    button = (
-      <Button disabled={lifecycle.pending} onClick={lifecycle.restore}>
-        {t("installments.restore")}
-      </Button>
-    );
-  } else if (item.retired) {
-    button = (
-      <Button
-        disabled={lifecycle.pending}
-        onClick={lifecycle.remove}
-        variant="destructive"
-      >
-        {t("installments.delete")}
-      </Button>
-    );
-  }
   return (
     <>
-      {button}
+      <InstallmentManageMenu item={item} lifecycle={lifecycle} t={t} />
+      <InstallmentLifecycleDialog item={item} lifecycle={lifecycle} />
       {lifecycle.error ? (
         <p className="text-sm text-destructive">{lifecycle.error}</p>
       ) : null}
     </>
+  );
+}
+
+function InstallmentStatusBadge({ item }: { item: InstallmentOverviewItem }) {
+  const { t } = useI18n();
+  if (!item.archivedAt && !item.retired) return null;
+  return (
+    <Badge variant={item.archivedAt ? "secondary" : "outline"}>
+      {t(
+        item.archivedAt
+          ? "installments.deletedStatus"
+          : "installments.retiredStatus",
+      )}
+    </Badge>
   );
 }
 
@@ -366,7 +560,10 @@ function InstallmentCard(props: Props & { item: InstallmentOverviewItem }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{item.name}</CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>{item.name}</CardTitle>
+          <InstallmentStatusBadge item={item} />
+        </div>
         <p className="text-sm text-muted-foreground">
           {t("retirement.progress")}: {item.currentInstallment}/
           {item.totalInstallments}
@@ -483,6 +680,21 @@ export function InstallmentsScreen(props: Props) {
         title={t("catwallet.installments")}
         description={t("catwallet.installmentsDescription")}
       />
+      <Button asChild type="button" variant="outline">
+        <Link
+          href={
+            props.view === "deleted"
+              ? "/installments"
+              : "/installments?view=deleted"
+          }
+        >
+          {t(
+            props.view === "deleted"
+              ? "installments.showActive"
+              : "installments.showDeleted",
+          )}
+        </Link>
+      </Button>
       <div className="grid items-start gap-4 lg:grid-cols-2">
         {props.items.map((item) => (
           <InstallmentCard key={item.groupId} {...props} item={item} />
